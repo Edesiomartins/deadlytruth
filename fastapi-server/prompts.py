@@ -10,13 +10,13 @@ REGRAS:
 
 
 CREATE_CASE_TEMPLATE = """
-[TAREFA] Criar um cenário de assassinato para 12 jogadores.
+[TAREFA] Criar um cenário de assassinato para {num_jogadores} jogadores.
 [CENÁRIO] {cenario}
 [DIFICULDADE] {nivel}
 [REQUERIMENTOS]
-- Identifique o culpado entre os IDs de 1 a 12.
-- Crie 12 perfis curtos (nome, ocupação, segredo).
-- Gere 12 "Pistas Iniciais", uma para cada jogador (o jogador X recebe a pista X).
+- Identifique o culpado entre os IDs de 1 a {num_jogadores}.
+- Crie {num_jogadores} perfis curtos (nome, ocupação, segredo).
+- Gere {num_jogadores} "Pistas Iniciais", uma para cada jogador (o jogador X recebe a pista X).
 - Defina o local exato do corpo e a arma do crime.
 [SAÍDA] Responda estritamente em JSON.
 """

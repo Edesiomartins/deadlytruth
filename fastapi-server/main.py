@@ -341,68 +341,59 @@ async def broadcast(room_id: str, message: dict):
 
 
 async def game_loop(room_id: str):
-    """Loop principal do jogo com sistema de turnos de 2 minutos"""
+    """Loop principal: inicia com 6-12 jogadores e adapta o enredo"""
     room = ROOMS.get(room_id)
     if not room:
         return
     
-    # O jogo começa com o número atual de jogadores (mínimo 6)
-    num_players = len(room.get("players", []))
+    # Captura o número real de jogadores no momento do início
+    participantes = room.get("players", [])
+    num_jogadores = len(participantes)
+    
     room["game_active"] = True
     
+    # 1. Solicita à IA a criação do caso específica para este número de pessoas
+    prompt_dinamico = CREATE_CASE_TEMPLATE.format(
+        cenario=room.get("cenario", "Hotel-Cassino"),
+        nivel=room.get("nivel", "Iniciante"),
+        num_jogadores=num_jogadores
+    )
+    
+    await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
+    
+    case_json = groq_generate(prompt_dinamico, system=SYSTEM_GAME_MASTER)
+    room["case"] = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+
     await broadcast(room_id, {
         "type": "game_start",
-        "msg": f"O mistério começa com {num_players} suspeitos!"
+        "payload": {
+            "msg": f"O mistério começou com {num_jogadores} suspeitos!",
+            "case": room["case"]
+        }
     })
 
+    # 2. Inicia a sequência de turnos
     while room.get("game_active", False):
-        players = room.get("players", [])
-        if len(players) < 6:
-            # Espera até ter pelo menos 6 jogadores
-            await asyncio.sleep(1)
-            continue
-        
-        current_idx = room.get("current_turn", 0)
-        current_player = players[current_idx] if current_idx < len(players) else players[0]
-        
-        # Notifica todos quem é a vez
-        room["turn_start_time"] = asyncio.get_event_loop().time()
-        await broadcast(room_id, {
-            "type": "turn_start",
-            "player": current_player,
-            "time_limit": 120  # 2 minutos
-        })
-        
-        # Reseta o evento de ação do jogador
-        if room_id in GAME_EVENTS:
-            GAME_EVENTS[room_id]["player_action_event"].clear()
-        
-        # Espera 2 minutos ou até o jogador agir
-        try:
-            if room_id in GAME_EVENTS:
-                await asyncio.wait_for(
-                    GAME_EVENTS[room_id]["player_action_event"].wait(),
-                    timeout=120.0
-                )
-                # Jogador agiu antes do timeout
-                await broadcast(room_id, {
-                    "type": "player_action",
-                    "player": current_player
-                })
-            else:
-                await asyncio.sleep(120)
-        except asyncio.TimeoutError:
-            # Timeout - passa para o próximo jogador
+        for idx, player_id in enumerate(participantes):
+            room["current_turn"] = idx
+            
             await broadcast(room_id, {
-                "type": "time_out",
-                "player": current_player,
-                "next_player": True
+                "type": "turn_start",
+                "player": player_id,
+                "time_limit": 120
             })
-        
-        # Avança para o próximo jogador (usa o número atual de jogadores)
-        num_players = len(players)
-        room["current_turn"] = (current_idx + 1) % num_players
-        await asyncio.sleep(1)  # Pequena pausa entre turnos
+            
+            if room_id in GAME_EVENTS:
+                GAME_EVENTS[room_id]["player_action_event"].clear()
+                try:
+                    await asyncio.wait_for(
+                        GAME_EVENTS[room_id]["player_action_event"].wait(),
+                        timeout=120.0
+                    )
+                except asyncio.TimeoutError:
+                    await broadcast(room_id, {"type": "time_out", "player": player_id})
+
+    room["game_active"] = False
 
 
 @app.websocket("/ws/{room_id}")
@@ -419,16 +410,17 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "case": {},
             "chat": [],
             "nivel": "Iniciante",
+            "cenario": "Hotel-Cassino",
             "players": [],
             "current_turn": 0,
             "game_active": False,
             "turn_start_time": None
         }
     
-    # Adiciona jogador à lista (sem limite máximo, mas mínimo de 6 para iniciar)
+    # Adiciona jogador à lista (limite de 12 jogadores)
     room = ROOMS[room_id]
     player_id = len(room.get("players", [])) + 1
-    if player_id not in room.get("players", []):
+    if player_id not in room.get("players", []) and player_id <= 12:
         room["players"].append(player_id)
     
     # Inicializa eventos de jogo se necessário
@@ -438,10 +430,15 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "current_player": 0
         }
     
-    # Inicia o loop de jogo em background se ainda não estiver rodando e tiver pelo menos 6 jogadores
-    num_players = len(room.get("players", []))
-    if not room.get("game_active", False) and num_players >= 6:
-        asyncio.create_task(game_loop(room_id))
+    # O jogo pode começar se tiver entre 6 e 12
+    num_atual = len(room.get("players", []))
+    
+    # O jogo pode começar se tiver entre 6 e 12
+    if not room.get("game_active") and 6 <= num_atual <= 12:
+        # Opcional: Você pode disparar o início automaticamente ao chegar em 12
+        # ou criar um comando "start" que o primeiro jogador envia
+        if num_atual == 12: 
+            asyncio.create_task(game_loop(room_id))
     
     # Envia estado inicial
     await websocket.send_text(json.dumps({
@@ -463,7 +460,21 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 data = json.loads(msg)
                 msg_type = data.get("type", "chat")
                 
-                if msg_type == "action" and room_id in GAME_EVENTS:
+                if msg_type == "start" and not room.get("game_active", False):
+                    # Comando para iniciar o jogo manualmente
+                    num_atual = len(room.get("players", []))
+                    if 6 <= num_atual <= 12:
+                        asyncio.create_task(game_loop(room_id))
+                        await broadcast(room_id, {
+                            "type": "status",
+                            "msg": f"Jogo iniciado por jogador {player_id} com {num_atual} participantes!"
+                        })
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": f"É necessário ter entre 6 e 12 jogadores. Atualmente: {num_atual}"
+                        }))
+                elif msg_type == "action" and room_id in GAME_EVENTS:
                     # Jogador realizou uma ação - sinaliza o evento
                     GAME_EVENTS[room_id]["player_action_event"].set()
                     await broadcast(room_id, {
