@@ -14,29 +14,17 @@ from prompts import SYSTEM_GAME_MASTER, CREATE_CASE_TEMPLATE, INTERROGATION_TEMP
 # Usa o diretório do arquivo atual para encontrar .env
 env_path = Path(__file__).parent / ".env"
 
-# Debug: verifica se o arquivo existe
 if env_path.exists():
-    print(f"✅ Arquivo .env encontrado em: {env_path}")
-    # Tenta ler o conteúdo para debug (primeiras linhas)
-    try:
-        with open(env_path, 'r', encoding='utf-8') as f:
-            first_line = f.readline().strip()
-            print(f"   Primeira linha do arquivo: {first_line[:50]}...")
-    except Exception as e:
-        print(f"   ⚠️ Erro ao ler arquivo: {e}")
+    load_dotenv(env_path, override=True)
+    print("✅ .env carregado localmente")
 else:
-    print(f"⚠️ Arquivo .env NÃO encontrado em: {env_path}")
+    # No Render, ele entrará aqui e não imprimirá erro, 
+    # apenas confiará nas variáveis de ambiente do painel.
+    pass 
 
-# Carrega as variáveis de ambiente
-load_dotenv(env_path, override=True)
-
-# Debug: verifica se a chave foi carregada
 api_key = os.getenv("GROQ_API_KEY")
-if api_key:
-    print(f"✅ GROQ_API_KEY carregada com sucesso (primeiros 10 caracteres: {api_key[:10]}...)")
-else:
-    print(f"⚠️ GROQ_API_KEY não encontrada após carregar .env")
-    print(f"   Verifique se o arquivo contém: GROQ_API_KEY=sua-chave-aqui")
+if not api_key:
+    print("❌ ERRO: GROQ_API_KEY não encontrada!")
 
 app = FastAPI()
 
