@@ -2,7 +2,26 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+}
+
 body {
   margin: 0;
-  background-color: #050505; /* Garante o fundo preto mesmo se o tailwind falhar */
+  background-color: #050505;
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Força o alinhamento dos slots de jogadores */
+.grid-lobby {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important; /* Mobile: 2 colunas */
+  gap: 1rem !important;
+}
+
+@media (min-width: 768px) {
+  .grid-lobby {
+    grid-template-columns: repeat(6, 1fr) !important; /* Desktop: 6 colunas */
+  }
 }

@@ -41,7 +41,7 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050505] text-slate-200 font-serif p-6">
+    <div className="min-h-screen bg-[#050505] text-[#e2e8f0] font-serif p-6">
       {/* Header Estilizado */}
       <header className="max-w-6xl mx-auto flex justify-between items-end border-b border-red-900/30 pb-4 mb-8">
         <div>
@@ -67,7 +67,7 @@ function App() {
               </p>
             </div>
 
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+            <div className="grid-lobby mb-8">
               {[...Array(12)].map((_, i) => {
                 const isConnected = i < gameState.total_players;
                 const isMe = i + 1 === gameState.player_id;
