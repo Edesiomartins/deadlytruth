@@ -8,7 +8,7 @@ function App() {
   const [inputMsg, setInputMsg] = useState("");
 
   // Substitua pela sua URL do Render (use wss:// para conexões seguras)
-  const BACKEND_URL = "wss://SUA-URL-NO-RENDER.onrender.com/ws/sala_teste";
+  const BACKEND_URL = "wss://deadlytruth.onrender.com/ws/sala_teste";
 
   useEffect(() => {
     const ws = new WebSocket(BACKEND_URL);
@@ -19,8 +19,17 @@ function App() {
       
       if (data.type === "hello") {
         setGameState(data.payload);
+      } else if (data.type === "game_start") {
+        setGameState((prev) => ({ ...prev, case: data.payload.case }));
+        setMessages((prev) => [...prev, data.payload.msg]);
+      } else if (data.type === "status") {
+        setMessages((prev) => [...prev, data.msg]);
+      } else if (data.type === "turn_start") {
+        setMessages((prev) => [...prev, `🔴 Turno do Suspeito ${data.player}`]);
+      } else if (data.type === "time_out") {
+        setMessages((prev) => [...prev, `⏱️ Tempo esgotado para Suspeito ${data.player}`]);
       } else if (data.type === "chat" || data.type === "interrogation") {
-        setMessages((prev) => [...prev, data.payload]);
+        setMessages((prev) => [...prev, data.payload || data]);
       }
     };
 
@@ -48,6 +57,31 @@ function App() {
           <User className="text-slate-400" />
         </div>
       </header>
+
+      {/* Grid de Jogadores */}
+      <div className="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-8">
+        {[...Array(12)].map((_, i) => {
+          const isConnected = i < (gameState?.total_players || 0);
+          const isMe = i + 1 === gameState?.player_id;
+
+          return (
+            <div 
+              key={i}
+              className={`h-32 rounded-lg border-2 flex flex-col items-center justify-center transition-all ${
+                isConnected 
+                  ? 'border-red-900 bg-slate-900 shadow-lg shadow-red-900/20' 
+                  : 'border-slate-800 bg-slate-950 opacity-40'
+              } ${isMe ? 'ring-2 ring-yellow-500 ring-offset-2 ring-offset-slate-950' : ''}`}
+            >
+              <User size={32} className={isConnected ? 'text-red-600' : 'text-slate-700'} />
+              <span className="text-xs mt-2 font-mono">
+                {isConnected ? `SUSPEITO ${i + 1}` : 'VAZIO'}
+              </span>
+              {isMe && <span className="text-[10px] text-yellow-500 font-bold">VOCÊ</span>}
+            </div>
+          );
+        })}
+      </div>
 
       <main className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Painel do Caso */}
