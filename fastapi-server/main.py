@@ -346,12 +346,19 @@ async def game_loop(room_id: str):
     if not room:
         return
     
+    # O jogo começa com o número atual de jogadores (mínimo 6)
+    num_players = len(room.get("players", []))
     room["game_active"] = True
     
+    await broadcast(room_id, {
+        "type": "game_start",
+        "msg": f"O mistério começa com {num_players} suspeitos!"
+    })
+
     while room.get("game_active", False):
         players = room.get("players", [])
-        if len(players) < 12:
-            # Espera até ter 12 jogadores
+        if len(players) < 6:
+            # Espera até ter pelo menos 6 jogadores
             await asyncio.sleep(1)
             continue
         
@@ -392,8 +399,9 @@ async def game_loop(room_id: str):
                 "next_player": True
             })
         
-        # Avança para o próximo jogador
-        room["current_turn"] = (current_idx + 1) % 12
+        # Avança para o próximo jogador (usa o número atual de jogadores)
+        num_players = len(players)
+        room["current_turn"] = (current_idx + 1) % num_players
         await asyncio.sleep(1)  # Pequena pausa entre turnos
 
 
@@ -417,10 +425,10 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "turn_start_time": None
         }
     
-    # Adiciona jogador à lista (se ainda não tiver 12)
+    # Adiciona jogador à lista (sem limite máximo, mas mínimo de 6 para iniciar)
     room = ROOMS[room_id]
     player_id = len(room.get("players", [])) + 1
-    if player_id <= 12 and player_id not in room.get("players", []):
+    if player_id not in room.get("players", []):
         room["players"].append(player_id)
     
     # Inicializa eventos de jogo se necessário
@@ -430,8 +438,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "current_player": 0
         }
     
-    # Inicia o loop de jogo em background se ainda não estiver rodando
-    if not room.get("game_active", False) and len(room.get("players", [])) == 12:
+    # Inicia o loop de jogo em background se ainda não estiver rodando e tiver pelo menos 6 jogadores
+    num_players = len(room.get("players", []))
+    if not room.get("game_active", False) and num_players >= 6:
         asyncio.create_task(game_loop(room_id))
     
     # Envia estado inicial
