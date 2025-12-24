@@ -1,27 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Special+Elite&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  color-scheme: dark;
+/* FORÇA TODO TEXTO A SER CLARO POR PADRÃO */
+* {
+  color: #f8fafc !important; /* Branco acinzentado */
+}
+
+/* EXCEÇÕES PARA CORES DE DESTAQUE */
+.text-red-500, .text-red-600, .text-red-700 {
+  color: #ef4444 !important;
+}
+
+.text-amber-400, .text-amber-500 {
+  color: #fbbf24 !important;
 }
 
 body {
   margin: 0;
   background-color: #050505;
-  color: #f8fafc;
-  -webkit-font-smoothing: antialiased;
+  font-family: 'Special Elite', system-ui, serif;
 }
 
-/* Força o alinhamento dos slots de jogadores */
-.grid-lobby {
-  display: grid !important;
-  grid-template-columns: repeat(2, 1fr) !important; /* Mobile: 2 colunas */
-  gap: 1rem !important;
-}
-
-@media (min-width: 768px) {
-  .grid-lobby {
-    grid-template-columns: repeat(6, 1fr) !important; /* Desktop: 6 colunas */
-  }
-}
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: #050505; }
+::-webkit-scrollbar-thumb { background: #7f1d1d; }
