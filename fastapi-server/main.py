@@ -369,10 +369,8 @@ async def game_loop(room_id: str):
     await broadcast(room_id, {
         "type": "game_start",
         "payload": {
-            "msg": f"O mistério começou com {num_jogadores} suspeitos!",
-            "content": f"O mistério começou! Local: {case_data.get('local_corpo', 'Desconhecido')}",
-            "case": case_data,
-            "game_active": True
+            "msg": "O mistério começou!",
+            "case": case_data  # O React vai ler isso aqui
         }
     })
 
@@ -479,8 +477,15 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 msg_type = data.get("type")
                 
                 if msg_type == "start":
-                    # Lógica de início manual...
-                    asyncio.create_task(game_loop(room_id))
+                    # Lógica de início manual
+                    num_atual = len(room.get("players", []))
+                    if num_atual >= 3:  # Mudado de 6 para 3
+                        asyncio.create_task(game_loop(room_id))
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "error", 
+                            "msg": f"Mínimo de 3 jogadores necessário. Atual: {num_atual}"
+                        }))
                 
                 elif msg_type == "action":
                     if room_id in GAME_EVENTS:
