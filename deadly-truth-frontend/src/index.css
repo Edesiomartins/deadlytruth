@@ -1,29 +1,1050 @@
-@import url('https://fonts.googleapis.com/css2?family=Special+Elite&display=swap');
+/*
+ * Arquivo CSS: index.css
+ * Projeto: Deadly Truth
+ * Descrição: Estilos globais e de componentes para o WebApp de mistério.
+ * Atmosfera: Noir, Mistério, Sangue Seco, Carvão, Ouro Envelhecido.
+ * Tipografia: Cinzel (serifada) para títulos, sans-serif para corpo.
+ */
 
+/* --- Tailwind CSS Directives (mantidas para compatibilidade) --- */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* --- 1. Importação de Fontes --- */
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Roboto:wght@300;400;700&display=swap');
+
+/* --- 2. Variáveis de Cores --- */
+:root {
+    /* Vermelho Sangue */
+    --color-red-dark: #8B0000;      /* Crimson Escuro */
+    --color-red-accent: #DC143C;    /* Crimson Brilhante */
+    --color-red-light: #C41E3A;     /* Crimson Médio */
+
+    /* Carvão */
+    --color-charcoal-dark: #0F0F0F; /* Preto Carvão */
+    --color-charcoal-medium: #1A1A1A; /* Cinza Escuro */
+    --color-charcoal-light: #2A2A2A; /* Cinza Médio */
+
+    /* Branco */
+    --color-white: #FFFFFF;         /* Branco Puro */
+    --color-off-white: #F5F5F5;     /* Branco Sujo */
+
+    /* Ouro Envelhecido */
+    --color-gold-aged: #D4AF37;     /* Ouro Envelhecido */
+    --color-gold-light: #C9A961;    /* Ouro Envelhecido Claro */
+
+    /* Cores de Status */
+    --color-status-success: #22C55E; /* Verde Esmeralda */
+    --color-status-warning: #F59E0B; /* Amarelo Âmbar */
+    --color-status-error: #EF4444;   /* Vermelho */
+}
+
+/* --- 3. Base Styles / Resets --- */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px; /* Base para rem */
+}
+
+body {
+    font-family: 'Roboto', sans-serif;
+    color: var(--color-off-white);
+    background-color: var(--color-charcoal-dark);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden; /* Evita scroll horizontal indesejado */
+    margin: 0;
+}
+
 /* FORÇA TODO TEXTO A SER CLARO POR PADRÃO */
 * {
-  color: #f8fafc !important; /* Branco acinzentado */
+    color: var(--color-off-white) !important;
 }
 
 /* EXCEÇÕES PARA CORES DE DESTAQUE */
 .text-red-500, .text-red-600, .text-red-700 {
-  color: #ef4444 !important;
+    color: var(--color-red-accent) !important;
 }
 
 .text-amber-400, .text-amber-500 {
-  color: #fbbf24 !important;
+    color: var(--color-gold-aged) !important;
 }
 
-body {
-  margin: 0;
-  background-color: #050505;
-  font-family: 'Special Elite', system-ui, serif;
+/* --- 4. Tipografia --- */
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'Cinzel', serif;
+    color: var(--color-white);
+    line-height: 1.2;
 }
 
-::-webkit-scrollbar { width: 4px; }
-::-webkit-scrollbar-track { background: #050505; }
-::-webkit-scrollbar-thumb { background: #7f1d1d; }
+h1 { font-size: 3rem; } /* 48px */
+h2 { font-size: 2.5rem; } /* 40px */
+h3 { font-size: 1.875rem; } /* 30px */
+h4 { font-size: 1.5rem; } /* 24px */
+p, span, div, a, li { font-size: 1rem; } /* 16px */
+small, .text-sm { font-size: 0.875rem; } /* 14px */
+.text-xs { font-size: 0.75rem; } /* 12px */
+
+.font-cinzel { font-family: 'Cinzel', serif; }
+.font-roboto { font-family: 'Roboto', sans-serif; }
+.font-mono { font-family: 'Roboto Mono', monospace; } /* Para elementos técnicos/códigos */
+
+/* --- 5. Layout Principal --- */
+.game-layout {
+    min-height: 100vh;
+    background: linear-gradient(135deg, var(--color-charcoal-dark) 0%, var(--color-charcoal-medium) 100%);
+    position: relative;
+    overflow: hidden;
+    padding: 1rem; /* Padding padrão para evitar que o conteúdo cole nas bordas */
+}
+
+.game-layout::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.08;
+    pointer-events: none;
+    background-image: 
+        radial-gradient(circle at 20% 50%, var(--color-red-accent)15 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, var(--color-red-light)15 0%, transparent 50%),
+        radial-gradient(circle at 40% 20%, var(--color-red-dark)10 0%, transparent 50%);
+    z-index: 0;
+}
+
+.game-container {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px; /* Largura máxima do conteúdo */
+    margin: 0 auto; /* Centraliza o container */
+    padding: 1rem;
+}
+
+/* --- 6. Componentes Gerais --- */
+
+/* Header */
+.game-header {
+    text-align: center;
+    margin-bottom: 3rem;
+    position: relative;
+}
+
+.game-header::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0.05;
+    /* Usar um ícone de Ghost ou similar aqui, se possível via CSS */
+    /* Exemplo: background-image: url('ghost-icon.svg'); background-size: 200px; background-repeat: no-repeat; background-position: center; */
+    z-index: -1;
+}
+
+.game-title {
+    font-size: 4rem; /* 64px */
+    font-weight: 900;
+    letter-spacing: -0.05em;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, var(--color-red-accent) 0%, var(--color-red-dark) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 15px var(--color-red-dark)50);
+}
+
+.game-status-indicator {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    font-family: 'Roboto Mono', monospace;
+    color: var(--color-off-white);
+}
+
+.game-status-dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    border-radius: 50%;
+}
+
+.game-status-dot.active {
+    background-color: var(--color-status-success);
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.game-status-dot.inactive {
+    background-color: var(--color-status-error);
+}
+
+/* Botões */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 1rem 2rem;
+    border-radius: 0.75rem;
+    font-weight: 700;
+    font-size: 1.125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    border: none;
+    outline: none;
+    position: relative;
+    overflow: hidden;
+    transition: all 0.3s ease-in-out;
+    color: var(--color-white);
+    background: linear-gradient(135deg, var(--color-red-dark) 0%, var(--color-red-light) 100%);
+    box-shadow: 0 4px 15px var(--color-red-dark)30;
+}
+
+.btn:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 20px var(--color-red-accent)40;
+    background: linear-gradient(135deg, var(--color-red-accent) 0%, var(--color-red-dark) 100%);
+}
+
+.btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+}
+
+.btn-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+}
+
+/* Inputs */
+.input-field {
+    flex-grow: 1;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    border: 2px solid var(--color-charcoal-light);
+    background-color: var(--color-charcoal-medium);
+    color: var(--color-white);
+    font-size: 0.875rem;
+    outline: none;
+    transition: border-color 0.3s ease-in-out;
+}
+
+.input-field::placeholder {
+    color: var(--color-charcoal-light);
+    opacity: 0.8;
+}
+
+.input-field:focus {
+    border-color: var(--color-red-accent);
+    box-shadow: 0 0 0 2px var(--color-red-accent)30;
+}
+
+/* --- 7. Componentes Específicos do Jogo --- */
+
+/* Lobby / Player Slots */
+.lobby-status-bar {
+    border: 2px solid var(--color-red-dark)50;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 4px 20px var(--color-charcoal-dark)50;
+}
+
+.lobby-status-bar .info-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.lobby-status-bar .info-group .icon {
+    color: var(--color-red-accent);
+    width: 1.75rem;
+    height: 1.75rem;
+}
+
+.lobby-status-bar .info-group .count {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-red-accent);
+}
+
+.lobby-status-bar .info-group .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-off-white)90;
+}
+
+.lobby-status-bar .timer-display {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1rem;
+    border-radius: 9999px; /* full rounded */
+    background-color: var(--color-charcoal-dark)30;
+    border: 1px solid var(--color-charcoal-medium);
+}
+
+.lobby-status-bar .timer-display .icon {
+    color: var(--color-gold-aged);
+    width: 1.125rem;
+    height: 1.125rem;
+}
+
+.lobby-status-bar .timer-display .text {
+    font-size: 0.875rem;
+    font-family: 'Roboto Mono', monospace;
+    color: var(--color-gold-light);
+}
+
+.player-slots-container {
+    display: flex;
+    overflow-x: auto; /* Permite scroll horizontal */
+    gap: 1rem;
+    padding-bottom: 1rem; /* Espaço para a scrollbar */
+    margin-bottom: 2.5rem;
+    -webkit-overflow-scrolling: touch; /* Melhor scroll em iOS */
+}
+
+.player-slot {
+    flex-shrink: 0; /* Impede que os slots encolham */
+    width: 140px; /* Largura fixa para cada slot */
+    height: 160px;
+    border-radius: 1rem;
+    border: 2px solid;
+    position: relative;
+    transition: all 0.3s ease-in-out;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+    box-shadow: 0 2px 10px var(--color-charcoal-dark)50;
+}
+
+.player-slot.connected {
+    border-color: var(--color-red-dark)60;
+    background: linear-gradient(135deg, var(--color-red-dark)30 0%, var(--color-red-light)15 100%);
+    box-shadow: 0 4px 15px var(--color-red-dark)20;
+}
+
+.player-slot.connected:hover {
+    transform: translateY(-3px) scale(1.03);
+    box-shadow: 0 6px 20px var(--color-red-accent)40;
+}
+
+.player-slot.disconnected {
+    border-color: var(--color-charcoal-medium)50;
+    background-color: var(--color-charcoal-light)50;
+    opacity: 0.4;
+}
+
+.player-slot .corner-decoration {
+    position: absolute;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-style: solid;
+    border-width: 2px;
+    border-color: transparent;
+}
+
+.player-slot.connected .corner-decoration {
+    border-color: var(--color-red-accent)70;
+}
+
+.player-slot.disconnected .corner-decoration {
+    border-color: var(--color-charcoal-medium)70;
+}
+
+.player-slot .corner-decoration.top-left { top: 0; left: 0; border-top-left-radius: 1rem; border-top-color: inherit; border-left-color: inherit; }
+.player-slot .corner-decoration.bottom-right { bottom: 0; right: 0; border-bottom-right-radius: 1rem; border-bottom-color: inherit; border-right-color: inherit; }
+
+.player-slot .icon-wrapper {
+    padding: 0.75rem;
+    border-radius: 50%;
+    margin-bottom: 0.75rem;
+}
+
+.player-slot.connected .icon-wrapper {
+    background-color: var(--color-red-dark)50;
+}
+
+.player-slot.disconnected .icon-wrapper {
+    background-color: var(--color-charcoal-medium)50;
+}
+
+.player-slot .icon-wrapper .icon {
+    width: 1.75rem;
+    height: 1.75rem;
+}
+
+.player-slot.connected .icon-wrapper .icon {
+    color: var(--color-red-accent);
+}
+
+.player-slot.disconnected .icon-wrapper .icon {
+    color: var(--color-charcoal-medium);
+}
+
+.player-slot .slot-label {
+    font-size: 0.75rem;
+    font-family: 'Roboto Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-off-white);
+}
+
+.player-slot .badge-you {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 0.5625rem; /* 9px */
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    box-shadow: 0 2px 8px var(--color-gold-aged)30;
+    background: linear-gradient(135deg, var(--color-gold-aged) 0%, var(--color-gold-light) 100%);
+    color: var(--color-charcoal-dark);
+}
+
+.player-slot .status-dot {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 0.5rem;
+    width: 0.375rem; /* 6px */
+    height: 0.375rem;
+    background-color: var(--color-status-success);
+    border-radius: 50%;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Game Screen Layout */
+.game-screen-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 1.5rem;
+}
+
+/* Painel do Dossiê do Crime */
+.case-file-panel {
+    position: sticky;
+    top: 1rem;
+    border: 2px solid var(--color-red-dark)60;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 8px 25px var(--color-charcoal-dark)50;
+}
+
+.case-file-panel .header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--color-red-dark)50;
+}
+
+.case-file-panel .header .icon-wrapper {
+    padding: 0.5rem;
+    border-radius: 0.5rem;
+    background-color: var(--color-red-dark)50;
+}
+
+.case-file-panel .header .icon {
+    width: 1.5rem;
+    height: 1.5rem;
+    color: var(--color-red-accent);
+}
+
+.case-file-panel .header .title {
+    font-size: 1.25rem;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-white);
+    font-family: 'Cinzel', serif;
+}
+
+.case-file-panel .content-section {
+    margin-bottom: 1rem;
+}
+
+.case-file-panel .description-box {
+    padding: 1rem;
+    border-radius: 0.75rem;
+    border: 1px solid var(--color-charcoal-medium)50;
+    background-color: var(--color-charcoal-dark)30;
+}
+
+.case-file-panel .description-text {
+    font-size: 0.875rem;
+    line-height: 1.7;
+    font-style: italic;
+    color: var(--color-off-white);
+    font-family: 'Cinzel', serif;
+}
+
+.case-file-panel .tag-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 1rem;
+}
+
+.case-file-panel .tag {
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-family: 'Roboto Mono', monospace;
+    text-transform: uppercase;
+    color: var(--color-white);
+    border: 1px solid;
+}
+
+.case-file-panel .tag.scenario {
+    background: linear-gradient(135deg, var(--color-gold-aged) 0%, var(--color-gold-light) 100%);
+    color: var(--color-charcoal-dark);
+    border-color: var(--color-gold-aged);
+}
+
+.case-file-panel .tag.evidence {
+    background-color: var(--color-red-dark)30;
+    border-color: var(--color-red-dark)40;
+}
+
+.case-file-panel .tag.urgent {
+    background-color: var(--color-status-warning)30;
+    border-color: var(--color-status-warning)40;
+}
+
+/* Chat / Sala de Interrogatório */
+.chat-area {
+    border: 2px solid var(--color-red-dark)40;
+    border-radius: 1rem;
+    overflow: hidden;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 8px 25px var(--color-charcoal-dark)50;
+    height: 600px; /* Altura fixa para o chat */
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-area .chat-header {
+    border-bottom: 1px solid var(--color-red-dark)50;
+    padding: 1rem;
+    background: linear-gradient(135deg, var(--color-red-dark)30 0%, var(--color-red-light)15 100%);
+}
+
+.chat-area .chat-header .content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.chat-area .chat-header .title-group {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.chat-area .chat-header .icon {
+    width: 1.375rem;
+    height: 1.375rem;
+    color: var(--color-red-accent);
+}
+
+.chat-area .chat-header .title {
+    font-size: 1.125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--color-white);
+    font-family: 'Cinzel', serif;
+}
+
+.chat-area .chat-header .message-count {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.75rem;
+    font-family: 'Roboto Mono', monospace;
+    color: var(--color-off-white)80;
+}
+
+.chat-area .chat-header .message-count .dot {
+    width: 0.5rem;
+    height: 0.5rem;
+    background-color: var(--color-status-success);
+    border-radius: 50%;
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.chat-area .messages-container {
+    flex-grow: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.chat-area .message-item {
+    opacity: 0; /* Para animação fadeIn */
+    animation: fadeIn 0.3s ease-in forwards;
+}
+
+.chat-area .message-item .sender-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.chat-area .message-item .sender-icon-wrapper {
+    width: 1.5rem;
+    height: 1.5rem;
+    background-color: var(--color-red-dark)50;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.chat-area .message-item .sender-icon {
+    width: 0.875rem;
+    height: 0.875rem;
+    color: var(--color-red-accent);
+}
+
+.chat-area .message-item .sender-name {
+    font-size: 0.75rem;
+    font-family: 'Roboto Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-off-white)90;
+}
+
+.chat-area .message-item .message-bubble {
+    border: 1px solid var(--color-charcoal-medium)50;
+    padding: 1rem;
+    border-radius: 0.75rem;
+    margin-left: 2rem; /* Alinha com o nome do remetente */
+    transition: border-color 0.3s ease-in-out;
+    background-color: var(--color-charcoal-light)80;
+}
+
+.chat-area .message-item .message-bubble:hover {
+    border-color: var(--color-red-accent)40;
+}
+
+.chat-area .message-item.system-message .message-bubble {
+    background-color: var(--color-gold-aged)10;
+    border-color: var(--color-gold-aged)30;
+}
+
+.chat-area .message-item .message-text {
+    font-size: 0.875rem;
+    line-height: 1.7;
+    color: var(--color-off-white);
+    font-family: 'Cinzel', serif;
+}
+
+.chat-area .input-area {
+    border-top: 1px solid var(--color-red-dark)50;
+    background-color: var(--color-charcoal-dark)40;
+    padding: 1rem;
+    display: flex;
+    gap: 0.75rem;
+}
+
+/* --- 8. Componentes de Jogo (Ainda não implementados no React, mas estilizados) --- */
+
+/* Tela de Papéis (Player Role) */
+.player-role {
+    border: 2px solid var(--color-gold-aged)60;
+    border-radius: 1rem;
+    padding: 2rem;
+    margin-bottom: 2rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 8px 25px var(--color-charcoal-dark)50;
+    text-align: center;
+}
+
+.player-role .role-title {
+    font-size: 1.875rem;
+    color: var(--color-gold-aged);
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.player-role .role-description {
+    font-size: 1rem;
+    color: var(--color-off-white);
+    margin-bottom: 1.5rem;
+}
+
+.player-role .role-details {
+    background-color: var(--color-charcoal-dark)50;
+    border: 1px solid var(--color-charcoal-medium);
+    border-radius: 0.75rem;
+    padding: 1rem;
+    text-align: left;
+}
+
+.player-role .role-details p {
+    margin-bottom: 0.5rem;
+    color: var(--color-off-white);
+}
+
+.player-role .role-details strong {
+    color: var(--color-gold-light);
+}
+
+/* Painel de Turno (Turn Panel) */
+.turn-panel {
+    border: 2px solid var(--color-red-dark)60;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 4px 15px var(--color-charcoal-dark)50;
+    text-align: center;
+}
+
+.turn-panel .current-player-info {
+    font-size: 1.25rem;
+    color: var(--color-red-accent);
+    margin-bottom: 0.75rem;
+    font-weight: 700;
+}
+
+.turn-panel .countdown {
+    font-size: 2.5rem;
+    font-family: 'Roboto Mono', monospace;
+    color: var(--color-gold-aged);
+    font-weight: 700;
+    margin-bottom: 1rem;
+}
+
+.turn-panel .status-message {
+    font-size: 0.875rem;
+    color: var(--color-off-white);
+}
+
+/* Pista Privada (Private Hint) */
+.private-hint {
+    border: 2px solid var(--color-gold-aged)60;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 4px 15px var(--color-charcoal-dark)50;
+}
+
+.private-hint .hint-title {
+    font-size: 1.125rem;
+    color: var(--color-gold-aged);
+    margin-bottom: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.private-hint .hint-content {
+    font-size: 0.9375rem; /* 15px */
+    color: var(--color-off-white);
+    line-height: 1.7;
+    font-style: italic;
+}
+
+/* Painel de Suspeitos (Suspect Panel) */
+.suspect-panel {
+    border: 2px solid var(--color-red-dark)60;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    margin-top: 1.5rem;
+    backdrop-filter: blur(5px);
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    box-shadow: 0 8px 25px var(--color-charcoal-dark)50;
+}
+
+.suspect-panel .panel-title {
+    font-size: 1.25rem;
+    color: var(--color-red-accent);
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-family: 'Cinzel', serif;
+}
+
+.suspect-panel .suspect-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 1rem;
+}
+
+.suspect-panel .suspect-card {
+    border: 1px solid var(--color-charcoal-medium);
+    border-radius: 0.75rem;
+    padding: 0.75rem;
+    background-color: var(--color-charcoal-dark)50;
+    text-align: center;
+    transition: all 0.3s ease-in-out;
+    cursor: pointer;
+}
+
+.suspect-panel .suspect-card:hover {
+    border-color: var(--color-red-accent);
+    background-color: var(--color-red-dark)20;
+    transform: translateY(-2px);
+}
+
+.suspect-panel .suspect-card .suspect-name {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--color-off-white);
+    margin-bottom: 0.25rem;
+}
+
+.suspect-panel .suspect-card .suspect-role {
+    font-size: 0.75rem;
+    color: var(--color-charcoal-light);
+}
+
+/* Tela de Acusação (Accusation Screen) */
+.accusation-screen {
+    position: fixed;
+    inset: 0;
+    background-color: var(--color-charcoal-dark)e0; /* Fundo escuro semi-transparente */
+    backdrop-filter: blur(8px);
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.3s ease-in-out, visibility 0.3s ease-in-out;
+}
+
+.accusation-screen.active {
+    opacity: 1;
+    visibility: visible;
+}
+
+.accusation-screen .accusation-box {
+    background: linear-gradient(135deg, var(--color-charcoal-medium) 0%, var(--color-charcoal-light) 100%);
+    border: 2px solid var(--color-red-accent);
+    border-radius: 1.5rem;
+    padding: 3rem;
+    max-width: 600px;
+    text-align: center;
+    box-shadow: 0 10px 30px var(--color-red-dark)50;
+    animation: slideInUp 0.5s ease-out;
+}
+
+.accusation-screen .accusation-title {
+    font-size: 2rem;
+    color: var(--color-red-accent);
+    margin-bottom: 1.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.accusation-screen .accusation-message {
+    font-size: 1.125rem;
+    color: var(--color-off-white);
+    margin-bottom: 2rem;
+}
+
+.accusation-screen .accusation-select {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border-radius: 0.75rem;
+    border: 2px solid var(--color-charcoal-light);
+    background-color: var(--color-charcoal-medium);
+    color: var(--color-white);
+    font-size: 1rem;
+    outline: none;
+    margin-bottom: 1.5rem;
+    appearance: none; /* Remove estilo padrão do select */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23F5F5F5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E"); /* Ícone de seta */
+    background-repeat: no-repeat;
+    background-position: right 0.75rem center;
+    background-size: 1rem;
+}
+
+.accusation-screen .accusation-select:focus {
+    border-color: var(--color-red-accent);
+    box-shadow: 0 0 0 2px var(--color-red-accent)30;
+}
+
+/* Gerenciador de Áudio (Audio Manager) */
+.audio-manager {
+    position: fixed;
+    bottom: 1rem;
+    right: 1rem;
+    background-color: var(--color-charcoal-dark)80;
+    backdrop-filter: blur(3px);
+    border: 1px solid var(--color-charcoal-medium);
+    border-radius: 0.75rem;
+    padding: 0.75rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    box-shadow: 0 2px 10px var(--color-charcoal-dark)50;
+}
+
+.audio-manager .audio-icon {
+    width: 1.25rem;
+    height: 1.25rem;
+    color: var(--color-gold-aged);
+}
+
+.audio-manager .audio-label {
+    font-size: 0.875rem;
+    color: var(--color-off-white);
+}
+
+.audio-manager .audio-toggle {
+    background-color: var(--color-charcoal-light);
+    border: none;
+    border-radius: 9999px;
+    width: 2.5rem;
+    height: 1.25rem;
+    position: relative;
+    cursor: pointer;
+    transition: background-color 0.3s ease-in-out;
+}
+
+.audio-manager .audio-toggle::before {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 0.875rem;
+    height: 0.875rem;
+    background-color: var(--color-off-white);
+    border-radius: 50%;
+    transition: transform 0.3s ease-in-out;
+}
+
+.audio-manager .audio-toggle.active {
+    background-color: var(--color-status-success);
+}
+
+.audio-manager .audio-toggle.active::before {
+    transform: translateX(1.25rem);
+}
+
+/* --- 9. Animações --- */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideInUp {
+    from { opacity: 0; transform: translateY(50px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* --- 10. Scrollbar Customizada (WebKit) --- */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--color-charcoal-medium);
+    border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+    background-color: var(--color-red-dark);
+    border-radius: 10px;
+    border: 2px solid var(--color-charcoal-medium);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-red-accent);
+}
+
+.player-slots-container::-webkit-scrollbar,
+.messages-container::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+.player-slots-container::-webkit-scrollbar-track,
+.messages-container::-webkit-scrollbar-track {
+    background: var(--color-charcoal-medium);
+    border-radius: 10px;
+}
+
+.player-slots-container::-webkit-scrollbar-thumb,
+.messages-container::-webkit-scrollbar-thumb {
+    background-color: var(--color-red-dark);
+    border-radius: 10px;
+    border: 2px solid var(--color-charcoal-medium);
+}
+
+.player-slots-container::-webkit-scrollbar-thumb:hover,
+.messages-container::-webkit-scrollbar-thumb:hover {
+    background-color: var(--color-red-accent);
+}
+
+/* --- 11. Responsividade --- */
+@media (min-width: 768px) { /* Medium devices (tablets) */
+    .game-title {
+        font-size: 5rem; /* 80px */
+    }
+
+    .game-screen-grid {
+        grid-template-columns: 2fr 3fr; /* Painel do caso à esquerda, chat à direita */
+    }
+
+    .player-slots-container {
+        justify-content: center; /* Centraliza os slots em telas maiores */
+        flex-wrap: wrap; /* Permite que os slots quebrem linha */
+        overflow-x: hidden; /* Remove scroll horizontal se couber */
+    }
+}
+
+@media (min-width: 1024px) { /* Large devices (desktops) */
+    .game-title {
+        font-size: 6rem; /* 96px */
+    }
+
+    .game-screen-grid {
+        grid-template-columns: 1fr 2fr; /* Painel do caso menor, chat maior */
+    }
+}
+
+@media (min-width: 1200px) { /* Extra large devices */
+    .game-container {
+        max-width: 1400px;
+    }
+}
