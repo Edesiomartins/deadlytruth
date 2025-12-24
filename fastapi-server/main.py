@@ -440,6 +440,19 @@ async def ws_room(websocket: WebSocket, room_id: str):
         if num_atual == 12: 
             asyncio.create_task(game_loop(room_id))
     
+    # NOVIDADE: Se o jogo já estiver rolando, envia os dados atuais para o novo player
+    if room.get("game_active") and room.get("case"):
+        await websocket.send_text(json.dumps({
+            "type": "game_start",
+            "payload": {
+                "msg": "Você chegou tarde à cena do crime, mas a investigação continua!",
+                "case": room["case"],
+                "total_players": len(room.get("players", [])),
+                "player_id": player_id,
+                "game_active": True
+            }
+        }))
+    
     # Envia estado inicial
     await websocket.send_text(json.dumps({
         "type": "hello",
@@ -449,7 +462,8 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "players": len(CONNECTIONS[room_id]),
             "total_players": len(room.get("players", [])),
             "case": room.get("case"),
-            "current_turn": room.get("current_turn", 0)
+            "current_turn": room.get("current_turn", 0),
+            "game_active": room.get("game_active", False)
         }
     }))
     
