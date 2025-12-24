@@ -18,7 +18,9 @@ CREATE_CASE_TEMPLATE = """
 - Crie {num_jogadores} perfis curtos (nome, ocupação, segredo).
 - Gere {num_jogadores} "Pistas Iniciais", uma para cada jogador (o jogador X recebe a pista X).
 - Defina o local exato do corpo e a arma do crime.
-[SAÍDA] Responda estritamente em JSON.
+- Crie uma "descricao" curta e impactante do caso (2-3 frases).
+- Crie uma "historia" detalhada do crime, incluindo contexto, motivação e detalhes da cena (4-6 frases).
+[SAÍDA] Responda estritamente em JSON com os campos: case_id, nivel, cenario, descricao, historia, culpado_id, jogadores, pistas_iniciais, local_corpo, arma_crime, suspeitos, evidencias, timeline, hipoteses_iniciais.
 """
 
 

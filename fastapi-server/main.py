@@ -192,6 +192,8 @@ class CaseData(BaseModel):
     case_id: str = ""
     nivel: str = "Iniciante"
     cenario: str = "Mansão"
+    descricao: str = ""  # Descrição inicial do caso
+    historia: str = ""  # História detalhada do crime
     culpado_id: int = 0
     jogadores: list[PlayerProfile] = []
     pistas_iniciais: list[str] = []
@@ -341,34 +343,36 @@ async def broadcast(room_id: str, message: dict):
 
 
 async def game_loop(room_id: str):
-    """Loop principal: inicia com 6-12 jogadores e adapta o enredo"""
     room = ROOMS.get(room_id)
-    if not room:
-        return
+    if not room: return
     
-    # Captura o número real de jogadores no momento do início
     participantes = room.get("players", [])
     num_jogadores = len(participantes)
-    
     room["game_active"] = True
     
-    # 1. Solicita à IA a criação do caso específica para este número de pessoas
+    await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
+    
+    # Gerar o caso
     prompt_dinamico = CREATE_CASE_TEMPLATE.format(
         cenario=room.get("cenario", "Hotel-Cassino"),
         nivel=room.get("nivel", "Iniciante"),
         num_jogadores=num_jogadores
     )
     
-    await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
-    
     case_json = groq_generate(prompt_dinamico, system=SYSTEM_GAME_MASTER)
-    room["case"] = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+    case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+    
+    # SALVAR NA SALA (Importante para quem entrar depois)
+    room["case"] = case_data 
 
+    # Enviar para todos com o campo 'content' e 'case' padronizados
     await broadcast(room_id, {
         "type": "game_start",
         "payload": {
             "msg": f"O mistério começou com {num_jogadores} suspeitos!",
-            "case": room["case"]
+            "content": f"O mistério começou! Local: {case_data.get('local_corpo', 'Desconhecido')}",
+            "case": case_data,
+            "game_active": True
         }
     })
 
@@ -472,42 +476,28 @@ async def ws_room(websocket: WebSocket, room_id: str):
             msg = await websocket.receive_text()
             try:
                 data = json.loads(msg)
-                msg_type = data.get("type", "chat")
+                msg_type = data.get("type")
                 
-                if msg_type == "start" and not room.get("game_active", False):
-                    # Comando para iniciar o jogo manualmente
-                    num_atual = len(room.get("players", []))
-                    if 6 <= num_atual <= 12:
-                        asyncio.create_task(game_loop(room_id))
-                        await broadcast(room_id, {
-                            "type": "status",
-                            "msg": f"Jogo iniciado por jogador {player_id} com {num_atual} participantes!"
-                        })
-                    else:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": f"É necessário ter entre 6 e 12 jogadores. Atualmente: {num_atual}"
-                        }))
-                elif msg_type == "action" and room_id in GAME_EVENTS:
-                    # Jogador realizou uma ação - sinaliza o evento
-                    GAME_EVENTS[room_id]["player_action_event"].set()
+                if msg_type == "start":
+                    # Lógica de início manual...
+                    asyncio.create_task(game_loop(room_id))
+                
+                elif msg_type == "action":
+                    if room_id in GAME_EVENTS:
+                        GAME_EVENTS[room_id]["player_action_event"].set()
+                    
+                    # Envia como um chat normal para aparecer na lista
                     await broadcast(room_id, {
                         "type": "chat",
-                        "payload": f"Jogador {player_id} realizou uma ação"
+                        "player_id": f"Suspeito {player_id}",
+                        "content": data.get("content", "Realizou uma ação")
                     })
-                else:
-                    # Chat colaborativo normal
-                    await broadcast(room_id, {
-                        "type": "chat",
-                        "payload": msg,
-                        "player_id": player_id
-                    })
-            except json.JSONDecodeError:
-                # Mensagem de texto simples
+            except Exception as e:
+                # Se for texto puro, encapsula no padrão
                 await broadcast(room_id, {
                     "type": "chat",
-                    "payload": msg,
-                    "player_id": player_id
+                    "player_id": f"Suspeito {player_id}",
+                    "content": msg
                 })
     except WebSocketDisconnect:
         CONNECTIONS[room_id].remove(websocket)
