@@ -18,9 +18,8 @@ if env_path.exists():
     load_dotenv(env_path, override=True)
     print("✅ .env carregado localmente")
 else:
-    # No Render, ele entrará aqui e não imprimirá erro, 
-    # apenas confiará nas variáveis de ambiente do painel.
-    pass 
+    # No Railway, ele entrará aqui e confiará nas variáveis de ambiente do painel.
+    print("ℹ️ Usando variáveis de ambiente do Railway") 
 
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
@@ -28,10 +27,15 @@ if not api_key:
 
 app = FastAPI()
 
-# Habilita CORS para que o frontend (Vercel) possa acessar o backend (Render)
+# Habilita CORS para que o frontend possa acessar o backend
+# Railway fornece a URL via variável de ambiente RAILWAY_PUBLIC_DOMAIN ou RAILWAY_STATIC_URL
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+if allowed_origins == ["*"]:
+    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Em produção, substitua pelo link do seu Vercel
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -518,4 +522,6 @@ async def ws_room(websocket: WebSocket, room_id: str):
 
 if __name__ == "__main__":
     import uvicorn  # pyright: ignore[reportMissingImports]
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Railway fornece a porta via variável de ambiente PORT
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
