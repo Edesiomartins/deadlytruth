@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Lock, Ghost, MessageSquare, Timer, Search, AlertCircle, Users } from 'lucide-react';
+import { User, Lock, Ghost, MessageSquare, Timer, Search, AlertCircle, Users, Sparkles, Zap, Crown, Target } from 'lucide-react';
 
 // --- CONFIGURAÇÃO ---
-const BACKEND_URL = "wss://deadlytruth.onrender.com/ws/sala_geral"; // URL do seu backend WebSocket
+// Usa variável de ambiente ou fallback para desenvolvimento local
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "ws://localhost:8000/ws/sala_geral";
 
 // --- PALETA DE CORES ---
 const COLORS = {
@@ -184,31 +185,77 @@ function App() {
       {/* Import Google Font Cinzel */}
       <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&display=swap" rel="stylesheet" />
 
-      {/* Background Pattern */}
+      {/* Background Pattern Animado */}
       <div 
         className="fixed inset-0 opacity-10 pointer-events-none"
         style={{
-          backgroundImage: `radial-gradient(circle at 20% 50%, ${COLORS.primaryRed}15 0%, transparent 50%), radial-gradient(circle at 80% 80%, ${COLORS.lightRed}15 0%, transparent 50%), radial-gradient(circle at 40% 20%, ${COLORS.accentRed}10 0%, transparent 50%)`
+          backgroundImage: `radial-gradient(circle at 20% 50%, ${COLORS.primaryRed}15 0%, transparent 50%), radial-gradient(circle at 80% 80%, ${COLORS.lightRed}15 0%, transparent 50%), radial-gradient(circle at 40% 20%, ${COLORS.accentRed}10 0%, transparent 50%)`,
+          animation: 'backgroundPulse 8s ease-in-out infinite'
         }}
       />
+      
+      {/* Partículas de Fundo */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        {[...Array(20)].map((_, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full opacity-20"
+            style={{
+              width: `${Math.random() * 4 + 2}px`,
+              height: `${Math.random() * 4 + 2}px`,
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              backgroundColor: COLORS.accentRed,
+              animation: `float ${Math.random() * 10 + 10}s ease-in-out infinite`,
+              animationDelay: `${Math.random() * 5}s`
+            }}
+          />
+        ))}
+      </div>
 
       <div className="relative z-10 p-4 md:p-8">
-        {/* Header */}
-        <header className="text-center mb-12 relative">
-          <div className="absolute inset-0 flex items-center justify-center opacity-10">
-            <Ghost size={200} className="text-red-900" />
+        {/* Header Modernizado */}
+        <header className="text-center mb-16 relative">
+          <div className="absolute inset-0 flex items-center justify-center opacity-5">
+            <Ghost size={250} className="text-red-900" style={{
+              animation: 'ghostFloat 6s ease-in-out infinite'
+            }} />
           </div>
           <div className="relative">
-            <h1 className="text-6xl md:text-7xl font-black tracking-tighter mb-2" style={titleGradient}>
-              DEADLY TRUTH
-            </h1>
-            <div className="flex items-center justify-center gap-2 text-xs uppercase font-mono" style={{ color: COLORS.offWhite }}>
-              <div className={`w-2 h-2 rounded-full ${socket?.readyState === 1 ? 'bg-emerald-500' : 'bg-red-600'}`} style={{
-                animation: socket?.readyState === 1 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none'
-              }} />
-              <span>
+            <div className="flex items-center justify-center gap-4 mb-4">
+              <Sparkles size={32} style={{ color: COLORS.agedGold, opacity: 0.7 }} className="animate-pulse" />
+              <h1 className="text-6xl md:text-8xl font-black tracking-tighter mb-2 relative" style={titleGradient}>
+                <span className="relative z-10">DEADLY TRUTH</span>
+                <span 
+                  className="absolute inset-0 blur-2xl opacity-50"
+                  style={{
+                    background: `linear-gradient(135deg, ${COLORS.accentRed} 0%, ${COLORS.primaryRed} 100%)`,
+                    WebkitBackgroundClip: 'text',
+                    WebkitTextFillColor: 'transparent',
+                    animation: 'glow 3s ease-in-out infinite'
+                  }}
+                >
+                  DEADLY TRUTH
+                </span>
+              </h1>
+              <Sparkles size={32} style={{ color: COLORS.agedGold, opacity: 0.7 }} className="animate-pulse" />
+            </div>
+            <div className="flex items-center justify-center gap-3 text-sm uppercase font-mono" style={{ color: COLORS.offWhite }}>
+              <div className="relative">
+                <div className={`w-3 h-3 rounded-full ${socket?.readyState === 1 ? 'bg-emerald-500' : 'bg-red-600'}`} style={{
+                  animation: socket?.readyState === 1 ? 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite' : 'none',
+                  boxShadow: socket?.readyState === 1 ? `0 0 10px ${COLORS.agedGold}` : 'none'
+                }} />
+                {socket?.readyState === 1 && (
+                  <div className="absolute inset-0 w-3 h-3 rounded-full bg-emerald-500 animate-ping opacity-75" />
+                )}
+              </div>
+              <span className="font-semibold">
                 {socket?.readyState === 1 ? 'Sistema Ativo' : 'Conexão Perdida'}
               </span>
+              {socket?.readyState === 1 && (
+                <Zap size={16} style={{ color: COLORS.agedGold }} className="animate-pulse" />
+              )}
             </div>
           </div>
         </header>
@@ -216,27 +263,82 @@ function App() {
         {/* Lobby Screen */}
         {!gameState.game_active ? (
           <div className="max-w-7xl mx-auto">
-            {/* Status Bar */}
-            <div className="border-2 rounded-2xl p-6 mb-8 backdrop-blur-sm shadow-lg" style={statusBarGradient}>
-              <div className="flex items-center justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-3">
-                  <Users size={28} style={{ color: COLORS.accentRed }} />
+            {/* Status Bar Modernizada */}
+            <div className="border-2 rounded-3xl p-8 mb-10 backdrop-blur-md shadow-2xl relative overflow-hidden" style={{
+              ...statusBarGradient,
+              background: `linear-gradient(135deg, ${COLORS.darkGray}90 0%, ${COLORS.mediumGray}90 100%)`,
+              borderColor: `${COLORS.primaryRed}60`,
+              boxShadow: `0 8px 32px ${COLORS.primaryRed}20, inset 0 1px 0 ${COLORS.primaryRed}20`
+            }}>
+              {/* Efeito de brilho animado */}
+              <div className="absolute inset-0 opacity-30" style={{
+                background: `linear-gradient(90deg, transparent, ${COLORS.accentRed}40, transparent)`,
+                animation: 'shimmer 3s ease-in-out infinite'
+              }} />
+              
+              <div className="relative z-10 flex items-center justify-between flex-wrap gap-6">
+                <div className="flex items-center gap-4">
+                  <div className="relative">
+                    <div className="p-3 rounded-2xl backdrop-blur-sm" style={{
+                      background: `linear-gradient(135deg, ${COLORS.primaryRed}40 0%, ${COLORS.lightRed}20 100%)`,
+                      border: `2px solid ${COLORS.accentRed}50`
+                    }}>
+                      <Users size={32} style={{ color: COLORS.accentRed }} className="animate-pulse" />
+                    </div>
+                    {gameState.total_players > 0 && (
+                      <div className="absolute -top-2 -right-2 w-6 h-6 rounded-full flex items-center justify-center" style={{
+                        background: `linear-gradient(135deg, ${COLORS.accentRed} 0%, ${COLORS.primaryRed} 100%)`,
+                        boxShadow: `0 0 10px ${COLORS.accentRed}`
+                      }}>
+                        <span className="text-xs font-bold text-white">{gameState.total_players}</span>
+                      </div>
+                    )}
+                  </div>
                   <div>
-                    <p className="text-2xl font-bold" style={{ color: COLORS.accentRed }}>{gameState.total_players}/12</p>
-                    <p className="text-xs uppercase tracking-wider font-sans" style={{ color: COLORS.offWhite }}>Investigadores Conectados</p>
+                    <p className="text-4xl font-black mb-1" style={{
+                      background: `linear-gradient(135deg, ${COLORS.accentRed} 0%, ${COLORS.agedGold} 100%)`,
+                      WebkitBackgroundClip: 'text',
+                      WebkitTextFillColor: 'transparent'
+                    }}>
+                      {gameState.total_players}/12
+                    </p>
+                    <p className="text-sm uppercase tracking-widest font-semibold" style={{ color: COLORS.offWhite }}>
+                      Investigadores Conectados
+                    </p>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 px-4 py-2 rounded-full border" style={{ backgroundColor: `${COLORS.charcoalBlack}30`, borderColor: COLORS.mediumGray }}>
-                  <Timer size={18} style={{ color: COLORS.agedGold }} />
-                  <span className="text-sm font-mono" style={{ color: COLORS.lightGold }}>Aguardando início...</span>
+                
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 px-5 py-3 rounded-full border backdrop-blur-sm" style={{
+                    backgroundColor: `${COLORS.charcoalBlack}40`,
+                    borderColor: `${COLORS.agedGold}50`,
+                    boxShadow: `0 0 15px ${COLORS.agedGold}20`
+                  }}>
+                    <Timer size={20} style={{ color: COLORS.agedGold }} className="animate-pulse" />
+                    <span className="text-sm font-mono font-semibold" style={{ color: COLORS.lightGold }}>
+                      Aguardando início...
+                    </span>
+                  </div>
+                  
+                  {gameState.total_players >= 3 && (
+                    <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{
+                      background: `linear-gradient(135deg, ${COLORS.agedGold}30 0%, ${COLORS.lightGold}20 100%)`,
+                      border: `2px solid ${COLORS.agedGold}50`
+                    }}>
+                      <Target size={18} style={{ color: COLORS.agedGold }} />
+                      <span className="text-xs font-bold uppercase tracking-wider" style={{ color: COLORS.lightGold }}>
+                        Pronto para iniciar
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
 
-            {/* Player Slots */}
+            {/* Player Slots Modernizados */}
             <div 
               ref={playerSlotsRef}
-              className="flex overflow-x-auto gap-4 pb-4 mb-10 scrollbar-thin"
+              className="flex overflow-x-auto gap-6 pb-6 mb-12 scrollbar-thin px-2"
               style={{
                 scrollbarColor: `${COLORS.primaryRed} ${COLORS.darkGray}`
               }}
@@ -247,45 +349,98 @@ function App() {
                 return (
                   <div 
                     key={i} 
-                    className={`relative flex-shrink-0 w-[140px] h-40 rounded-xl transition-all duration-300 border-2 ${
+                    className={`relative flex-shrink-0 w-[160px] h-48 rounded-2xl transition-all duration-500 border-2 group ${
                       isConnected 
-                        ? 'shadow-lg shadow-primaryRed/20 hover:shadow-primaryRed/40 hover:scale-105' 
-                        : 'opacity-40'
+                        ? 'shadow-2xl hover:shadow-[0_0_30px_rgba(220,20,60,0.5)] hover:scale-110 hover:-translate-y-2' 
+                        : 'opacity-30 hover:opacity-50'
                     }`}
-                    style={isConnected ? cardActiveGradient : cardInactiveGradient}
+                    style={{
+                      ...(isConnected ? {
+                        background: `linear-gradient(135deg, ${COLORS.primaryRed}40 0%, ${COLORS.lightRed}20 100%)`,
+                        borderColor: `${COLORS.accentRed}60`,
+                        backdropFilter: 'blur(10px)',
+                        boxShadow: isConnected ? `0 8px 24px ${COLORS.primaryRed}30, inset 0 1px 0 ${COLORS.accentRed}30` : 'none'
+                      } : {
+                        background: `${COLORS.darkGray}60`,
+                        borderColor: `${COLORS.mediumGray}40`,
+                        backdropFilter: 'blur(5px)'
+                      })
+                    }}
                   >
-                    {/* Corner Decoration */}
+                    {/* Efeito de brilho no hover */}
+                    {isConnected && (
+                      <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{
+                        background: `radial-gradient(circle at center, ${COLORS.accentRed}20, transparent 70%)`
+                      }} />
+                    )}
+                    
+                    {/* Corner Decoration Modernizada */}
                     <div 
-                      className="absolute top-0 left-0 w-6 h-6 border-t-2 border-l-2 rounded-tl-xl" 
-                      style={{ borderColor: isConnected ? `${COLORS.accentRed}70` : `${COLORS.mediumGray}70` }}
+                      className="absolute top-0 left-0 w-8 h-8 border-t-3 border-l-3 rounded-tl-2xl transition-all duration-300" 
+                      style={{ 
+                        borderColor: isConnected ? `${COLORS.accentRed}80` : `${COLORS.mediumGray}50`,
+                        boxShadow: isConnected ? `-2px -2px 8px ${COLORS.accentRed}30` : 'none'
+                      }}
                     />
                     <div 
-                      className="absolute bottom-0 right-0 w-6 h-6 border-b-2 border-r-2 rounded-br-xl" 
-                      style={{ borderColor: isConnected ? `${COLORS.accentRed}70` : `${COLORS.mediumGray}70` }}
+                      className="absolute bottom-0 right-0 w-8 h-8 border-b-3 border-r-3 rounded-br-2xl transition-all duration-300" 
+                      style={{ 
+                        borderColor: isConnected ? `${COLORS.accentRed}80` : `${COLORS.mediumGray}50`,
+                        boxShadow: isConnected ? `2px 2px 8px ${COLORS.accentRed}30` : 'none'
+                      }}
                     />
                     
-                    <div className="h-full flex flex-col items-center justify-center p-4">
+                    <div className="h-full flex flex-col items-center justify-center p-5 relative z-10">
                       <div 
-                        className="mb-3 p-3 rounded-full"
-                        style={{ backgroundColor: isConnected ? `${COLORS.primaryRed}50` : `${COLORS.darkGray}50` }}
+                        className="mb-4 p-4 rounded-full transition-all duration-300 group-hover:scale-110"
+                        style={{ 
+                          background: isConnected 
+                            ? `linear-gradient(135deg, ${COLORS.primaryRed}60 0%, ${COLORS.accentRed}40 100%)`
+                            : `${COLORS.darkGray}60`,
+                          boxShadow: isConnected ? `0 4px 15px ${COLORS.primaryRed}40` : 'none',
+                          border: isConnected ? `2px solid ${COLORS.accentRed}50` : 'none'
+                        }}
                       >
-                        <User size={28} style={{ color: isConnected ? COLORS.accentRed : COLORS.mediumGray }} />
+                        <User size={32} style={{ 
+                          color: isConnected ? COLORS.accentRed : COLORS.mediumGray,
+                          filter: isConnected ? `drop-shadow(0 0 8px ${COLORS.accentRed})` : 'none'
+                        }} />
                       </div>
-                      <span className="text-xs font-mono uppercase tracking-wider" style={{ color: COLORS.offWhite }}>
+                      
+                      <span className="text-xs font-mono uppercase tracking-widest font-bold mb-1" style={{ 
+                        color: isConnected ? COLORS.offWhite : COLORS.mediumGray 
+                      }}>
                         Slot #{i + 1}
                       </span>
+                      
+                      {isConnected && (
+                        <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ 
+                          color: COLORS.agedGold,
+                          textShadow: `0 0 8px ${COLORS.agedGold}50`
+                        }}>
+                          Online
+                        </span>
+                      )}
+                      
                       {isMe && (
-                        <div className="absolute top-2 right-2">
-                          <span className="text-[9px] px-3 py-1 rounded-full font-bold tracking-wider shadow-lg" style={badgeGradient}>
-                            VOCÊ
-                          </span>
+                        <div className="absolute top-3 right-3 animate-bounce">
+                          <div className="relative">
+                            <Crown size={20} style={{ color: COLORS.agedGold }} className="drop-shadow-lg" />
+                            <div className="absolute inset-0 animate-ping">
+                              <Crown size={20} style={{ color: COLORS.agedGold, opacity: 0.5 }} />
+                            </div>
+                          </div>
                         </div>
                       )}
+                      
                       {isConnected && (
-                        <div className="absolute bottom-2 left-2">
-                          <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" style={{
-                            animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite'
-                          }} />
+                        <div className="absolute bottom-3 left-3">
+                          <div className="relative">
+                            <div className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" style={{
+                              boxShadow: `0 0 10px ${COLORS.agedGold}`
+                            }} />
+                            <div className="absolute inset-0 w-2 h-2 bg-emerald-500 rounded-full animate-ping opacity-75" />
+                          </div>
                         </div>
                       )}
                     </div>
@@ -294,27 +449,89 @@ function App() {
               })}
             </div>
 
-            {/* Start Button */}
+            {/* Start Button Modernizado */}
             <div className="flex justify-center">
               <button 
                 onClick={() => socket?.send(JSON.stringify({type: 'start'}))}
-                disabled={!socket || socket.readyState !== WebSocket.OPEN || gameState.total_players < 1} // Desabilitar se não houver jogadores
-                className="group relative px-12 py-5 rounded-2xl font-black text-lg tracking-widest transition-all duration-300 hover:scale-105 hover:shadow-2xl disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-                style={buttonGradient}
+                disabled={!socket || socket.readyState !== WebSocket.OPEN || gameState.total_players < 3}
+                className="group relative px-16 py-6 rounded-3xl font-black text-xl tracking-widest transition-all duration-500 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100 overflow-hidden"
+                style={{
+                  background: gameState.total_players >= 3
+                    ? `linear-gradient(135deg, ${COLORS.primaryRed} 0%, ${COLORS.accentRed} 50%, ${COLORS.primaryRed} 100%)`
+                    : `linear-gradient(135deg, ${COLORS.darkGray} 0%, ${COLORS.mediumGray} 100%)`,
+                  backgroundSize: '200% 200%',
+                  color: COLORS.white,
+                  boxShadow: gameState.total_players >= 3
+                    ? `0 10px 40px ${COLORS.primaryRed}50, inset 0 1px 0 ${COLORS.accentRed}50`
+                    : 'none',
+                  border: gameState.total_players >= 3 ? `2px solid ${COLORS.accentRed}60` : `2px solid ${COLORS.mediumGray}40`,
+                  animation: gameState.total_players >= 3 ? 'gradientShift 3s ease infinite' : 'none'
+                }}
                 onMouseEnter={(e) => {
-                  if (!e.currentTarget.disabled) {
-                    Object.assign(e.currentTarget.style, buttonHoverGradient);
+                  if (!e.currentTarget.disabled && gameState.total_players >= 3) {
+                    e.currentTarget.style.transform = 'scale(1.05) translateY(-4px)';
+                    e.currentTarget.style.boxShadow = `0 15px 50px ${COLORS.accentRed}60, inset 0 1px 0 ${COLORS.accentRed}70`;
                   }
                 }}
                 onMouseLeave={(e) => {
-                  Object.assign(e.currentTarget.style, buttonGradient);
+                  if (!e.currentTarget.disabled) {
+                    e.currentTarget.style.transform = 'scale(1)';
+                    e.currentTarget.style.boxShadow = gameState.total_players >= 3
+                      ? `0 10px 40px ${COLORS.primaryRed}50, inset 0 1px 0 ${COLORS.accentRed}50`
+                      : 'none';
+                  }
                 }}
               >
-                <div className="absolute inset-0 bg-accentRed/20 rounded-2xl blur-xl group-hover:bg-accentRed/30 transition-all" />
-                <span className="relative flex items-center gap-3">
-                  <Search size={20} />
-                  INICIAR INVESTIGAÇÃO
+                {/* Efeito de brilho animado */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500" style={{
+                  background: `linear-gradient(90deg, transparent, ${COLORS.white}30, transparent)`,
+                  animation: 'shimmer 1.5s ease-in-out infinite'
+                }} />
+                
+                {/* Partículas de fundo */}
+                <div className="absolute inset-0 opacity-20">
+                  {[...Array(6)].map((_, i) => (
+                    <div
+                      key={i}
+                      className="absolute rounded-full"
+                      style={{
+                        width: '4px',
+                        height: '4px',
+                        backgroundColor: COLORS.white,
+                        left: `${Math.random() * 100}%`,
+                        top: `${Math.random() * 100}%`,
+                        animation: `sparkle ${Math.random() * 2 + 1}s ease-in-out infinite`,
+                        animationDelay: `${Math.random() * 1}s`
+                      }}
+                    />
+                  ))}
+                </div>
+                
+                <span className="relative flex items-center gap-4 z-10">
+                  <div className="relative">
+                    <Search size={24} className="group-hover:rotate-12 transition-transform duration-300" />
+                    {gameState.total_players >= 3 && (
+                      <div className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-ping" />
+                    )}
+                  </div>
+                  <span className="relative">
+                    INICIAR INVESTIGAÇÃO
+                    {gameState.total_players >= 3 && (
+                      <span className="absolute -bottom-1 left-0 right-0 h-0.5 bg-white animate-pulse" style={{
+                        boxShadow: `0 0 8px ${COLORS.white}`
+                      }} />
+                    )}
+                  </span>
+                  {gameState.total_players >= 3 && (
+                    <Zap size={20} className="animate-pulse" />
+                  )}
                 </span>
+                
+                {gameState.total_players < 3 && (
+                  <span className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 text-xs font-mono text-red-400 whitespace-nowrap">
+                    Mínimo de 3 jogadores
+                  </span>
+                )}
               </button>
             </div>
           </div>
@@ -472,6 +689,84 @@ function App() {
           to {
             opacity: 1;
             transform: translateY(0);
+          }
+        }
+        
+        @keyframes backgroundPulse {
+          0%, 100% {
+            opacity: 0.1;
+            transform: scale(1);
+          }
+          50% {
+            opacity: 0.15;
+            transform: scale(1.05);
+          }
+        }
+        
+        @keyframes float {
+          0%, 100% {
+            transform: translateY(0) translateX(0);
+          }
+          25% {
+            transform: translateY(-20px) translateX(10px);
+          }
+          50% {
+            transform: translateY(-10px) translateX(-10px);
+          }
+          75% {
+            transform: translateY(-30px) translateX(5px);
+          }
+        }
+        
+        @keyframes ghostFloat {
+          0%, 100% {
+            transform: translateY(0) rotate(0deg);
+            opacity: 0.05;
+          }
+          50% {
+            transform: translateY(-30px) rotate(5deg);
+            opacity: 0.08;
+          }
+        }
+        
+        @keyframes glow {
+          0%, 100% {
+            filter: blur(20px) brightness(1);
+          }
+          50% {
+            filter: blur(25px) brightness(1.2);
+          }
+        }
+        
+        @keyframes shimmer {
+          0% {
+            transform: translateX(-100%);
+          }
+          100% {
+            transform: translateX(100%);
+          }
+        }
+        
+        @keyframes gradientShift {
+          0% {
+            background-position: 0% 50%;
+          }
+          50% {
+            background-position: 100% 50%;
+          }
+          100% {
+            background-position: 0% 50%;
+          }
+        }
+        
+        @keyframes sparkle {
+          0%, 100% {
+            opacity: 0;
+            transform: scale(0);
+          }
+          50% {
+            opacity: 1;
+            transform: scale(1);
           }
         }
 
