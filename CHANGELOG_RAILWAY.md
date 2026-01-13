@@ -151,6 +151,12 @@ preview: {
 **`CHANGELOG_RAILWAY.md`** (este arquivo)
 - ✅ Documentação completa de todas as mudanças
 
+**`ENV_SETUP.md`**
+- ✅ Guia de configuração de variáveis de ambiente
+- ✅ Instruções para limpeza de variáveis do Render
+- ✅ Diferença entre desenvolvimento local e produção (Railway)
+- ✅ Checklist de limpeza
+
 ---
 
 ## 🔐 Variáveis de Ambiente
@@ -194,6 +200,7 @@ PORT=3000 (gerenciado automaticamente pelo Railway)
 ### Documentação
 - ✅ `RAILWAY_SETUP.md`
 - ✅ `CHANGELOG_RAILWAY.md` (este arquivo)
+- ✅ `ENV_SETUP.md`
 
 ---
 
@@ -207,6 +214,52 @@ PORT=3000 (gerenciado automaticamente pelo Railway)
 - ✅ `deadly-truth-frontend/src/App.jsx`
 - ✅ `deadly-truth-frontend/package.json`
 - ✅ `deadly-truth-frontend/vite.config.js`
+
+---
+
+## 🗑️ Arquivos Removidos
+
+### Limpeza de Arquivos Não Utilizados
+
+**`GITHUB_SETUP.md`**
+- ❌ Removido - Guia de setup do GitHub não é mais necessário após conexão com Railway
+- O Railway gerencia a conexão com GitHub automaticamente
+
+**`deadly-truth-frontend/README.md`**
+- ❌ Removido - README padrão do template Vite
+- Não continha informações específicas do projeto
+
+**Motivo da remoção:**
+- Arquivos específicos de outras plataformas (Render/Vercel) não são mais necessários
+- Documentação consolidada nos guias principais
+- Projeto limpo e focado apenas no Railway
+
+---
+
+## 🧹 Limpeza de Variáveis de Ambiente
+
+### Arquivos .env
+
+**Backend (`fastapi-server/.env`)**
+- ✅ Removidas referências ao Render
+- ✅ Mantidas apenas variáveis necessárias:
+  - `GROQ_API_KEY` - Chave API do Groq
+  - `ALLOWED_ORIGINS` - URLs permitidas (localhost para dev)
+  - `PORT` - Porta do servidor (opcional)
+
+**Frontend (`deadly-truth-frontend/.env`)**
+- ✅ Criado arquivo `.env` com:
+  - `VITE_BACKEND_URL` - URL do backend WebSocket (localhost para dev)
+
+**Variáveis Removidas:**
+- ❌ Qualquer variável com `RENDER_` no nome
+- ❌ URLs do Render (ex: `https://deadlytruth.onrender.com`)
+- ❌ Configurações específicas do Render/Vercel
+
+**Importante:**
+- Arquivos `.env` são apenas para desenvolvimento local
+- No Railway, variáveis são configuradas no painel de cada serviço
+- Arquivos `.env` estão protegidos pelo `.gitignore`
 
 ---
 
@@ -301,8 +354,15 @@ Antes de fazer deploy, verifique:
 ### Documentação
 - [x] `RAILWAY_SETUP.md` criado com guia completo
 - [x] `CHANGELOG_RAILWAY.md` criado (este arquivo)
+- [x] `ENV_SETUP.md` criado com guia de variáveis
 - [x] `README.md` do backend atualizado
 - [x] Variáveis de ambiente documentadas
+
+### Limpeza
+- [x] Arquivos não utilizados removidos
+- [x] Variáveis do Render removidas dos `.env`
+- [x] Referências ao Render/Vercel removidas
+- [x] Projeto limpo e focado no Railway
 
 ---
 
@@ -341,6 +401,22 @@ Todas as mudanças foram realizadas com sucesso. O projeto está pronto para dep
 - CORS configurado corretamente
 
 **Próximo passo:** Deploy do frontend seguindo o guia em `RAILWAY_SETUP.md`
+
+### ✅ Limpeza Realizada
+
+**Arquivos Removidos:**
+- ❌ `GITHUB_SETUP.md` - Não mais necessário
+- ❌ `deadly-truth-frontend/README.md` - README genérico removido
+
+**Variáveis de Ambiente:**
+- ✅ Referências ao Render removidas dos `.env`
+- ✅ Apenas variáveis necessárias mantidas
+- ✅ Guia `ENV_SETUP.md` criado para referência
+
+**Status:**
+- ✅ Projeto limpo e organizado
+- ✅ Sem dependências de outras plataformas
+- ✅ Focado exclusivamente no Railway
 
 ---
 

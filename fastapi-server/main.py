@@ -17,13 +17,25 @@ env_path = Path(__file__).parent / ".env"
 if env_path.exists():
     load_dotenv(env_path, override=True)
     print("✅ .env carregado localmente")
+    print(f"📁 Caminho do .env: {env_path}")
 else:
     # No Railway, ele entrará aqui e confiará nas variáveis de ambiente do painel.
-    print("ℹ️ Usando variáveis de ambiente do Railway") 
+    print("ℹ️ Usando variáveis de ambiente do sistema (Railway)")
+    print("💡 Dica: Configure GROQ_API_KEY no painel do Railway → Variables")
+
+# Tenta carregar também do ambiente do sistema (útil para Railway)
+# Isso garante que variáveis do Railway sejam carregadas mesmo se .env existir
+load_dotenv(override=False)  # Não sobrescreve se já foi carregado
 
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
     print("❌ ERRO: GROQ_API_KEY não encontrada!")
+    print("🔧 SOLUÇÃO:")
+    print("   - Se estiver no Railway: Configure a variável no painel → Variables")
+    print("   - Se estiver localmente: Crie/edite fastapi-server/.env com: GROQ_API_KEY=sua-chave")
+    print(f"   - Arquivo .env existe? {env_path.exists()}")
+else:
+    print(f"✅ GROQ_API_KEY encontrada (tamanho: {len(api_key)} caracteres)")
 
 app = FastAPI()
 
@@ -31,7 +43,7 @@ app = FastAPI()
 # Railway fornece a URL via variável de ambiente RAILWAY_PUBLIC_DOMAIN ou RAILWAY_STATIC_URL
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 if allowed_origins == ["*"]:
-    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
+    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
 
 app.add_middleware(
     CORSMiddleware,
