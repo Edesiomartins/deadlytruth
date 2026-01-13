@@ -14,28 +14,46 @@ from prompts import SYSTEM_GAME_MASTER, CREATE_CASE_TEMPLATE, INTERROGATION_TEMP
 # Usa o diretório do arquivo atual para encontrar .env
 env_path = Path(__file__).parent / ".env"
 
+# No Railway, as variáveis vêm do ambiente do sistema, não do .env
+# Carrega primeiro do .env se existir (desenvolvimento local)
 if env_path.exists():
     load_dotenv(env_path, override=True)
     print("✅ .env carregado localmente")
     print(f"📁 Caminho do .env: {env_path}")
 else:
-    # No Railway, ele entrará aqui e confiará nas variáveis de ambiente do painel.
-    print("ℹ️ Usando variáveis de ambiente do sistema (Railway)")
-    print("💡 Dica: Configure GROQ_API_KEY no painel do Railway → Variables")
+    print("ℹ️ Arquivo .env não encontrado (normal no Railway)")
 
-# Tenta carregar também do ambiente do sistema (útil para Railway)
-# Isso garante que variáveis do Railway sejam carregadas mesmo se .env existir
-load_dotenv(override=False)  # Não sobrescreve se já foi carregado
+# IMPORTANTE: No Railway, as variáveis vêm diretamente do ambiente do sistema
+# Não precisa de load_dotenv() para variáveis do Railway
+# Mas vamos tentar carregar do ambiente do sistema também
+# (útil se houver um .env que não sobrescreve variáveis do sistema)
+load_dotenv(override=False)
+
+# Debug: mostra todas as variáveis de ambiente que começam com GROQ
+print("🔍 Variáveis de ambiente relacionadas a GROQ:")
+groq_vars_found = False
+for key, value in os.environ.items():
+    if 'GROQ' in key.upper():
+        print(f"   {key} = {'*' * min(len(value), 20)} (tamanho: {len(value)})")
+        groq_vars_found = True
+if not groq_vars_found:
+    print("   (nenhuma variável encontrada)")
 
 api_key = os.getenv("GROQ_API_KEY")
 if not api_key:
     print("❌ ERRO: GROQ_API_KEY não encontrada!")
     print("🔧 SOLUÇÃO:")
-    print("   - Se estiver no Railway: Configure a variável no painel → Variables")
+    print("   - Se estiver no Railway:")
+    print("     1. Vá no serviço do backend → Variables")
+    print("     2. Adicione: GROQ_API_KEY (nome exato, maiúsculas)")
+    print("     3. Valor: sua chave API do Groq")
+    print("     4. Salve e aguarde redeploy automático")
     print("   - Se estiver localmente: Crie/edite fastapi-server/.env com: GROQ_API_KEY=sua-chave")
     print(f"   - Arquivo .env existe? {env_path.exists()}")
+    print("   - Variáveis do sistema disponíveis? Verifique acima")
 else:
     print(f"✅ GROQ_API_KEY encontrada (tamanho: {len(api_key)} caracteres)")
+    print(f"   Primeiros caracteres: {api_key[:10]}...")
 
 app = FastAPI()
 
@@ -43,7 +61,7 @@ app = FastAPI()
 # Railway fornece a URL via variável de ambiente RAILWAY_PUBLIC_DOMAIN ou RAILWAY_STATIC_URL
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
 if allowed_origins == ["*"]:
-    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
+    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
 
 app.add_middleware(
     CORSMiddleware,
