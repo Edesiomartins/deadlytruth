@@ -4,3 +4,7 @@ groq
 pydantic
 python-dotenv
 httpx
+sqlalchemy
+passlib[bcrypt]
+python-jose[cryptography]
+psycopg2-binary

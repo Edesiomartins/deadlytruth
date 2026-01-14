@@ -9,6 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMiss
 from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
 from prompts import SYSTEM_GAME_MASTER, CREATE_CASE_TEMPLATE, INTERROGATION_TEMPLATE
+from auth_routes import router as auth_router
+from auth_utils import decode_access_token
+from database import init_db
 
 # Carrega variáveis de ambiente do arquivo .env
 # Usa o diretório do arquivo atual para encontrar .env
@@ -57,6 +60,11 @@ else:
 
 app = FastAPI()
 
+
+@app.on_event("startup")
+def on_startup():
+    init_db()
+
 # Habilita CORS para que o frontend possa acessar o backend
 # Railway fornece a URL via variável de ambiente RAILWAY_PUBLIC_DOMAIN ou RAILWAY_STATIC_URL
 allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
@@ -70,6 +78,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(auth_router)
 
 # Cliente Groq (inicializado lazy)
 _client = None
@@ -434,6 +444,18 @@ async def game_loop(room_id: str):
 
 @app.websocket("/ws/{room_id}")
 async def ws_room(websocket: WebSocket, room_id: str):
+    token = websocket.query_params.get("token")
+    user_email = None
+    if token:
+        payload = decode_access_token(token)
+        if payload:
+            user_email = payload.get("sub")
+
+    require_auth_ws = os.getenv("REQUIRE_AUTH_WS", "false").lower() == "true"
+    if require_auth_ws and not user_email:
+        await websocket.close(code=1008)
+        return
+
     await websocket.accept()
     
     if room_id not in CONNECTIONS:
@@ -526,16 +548,18 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         GAME_EVENTS[room_id]["player_action_event"].set()
                     
                     # Envia como um chat normal para aparecer na lista
+                    sender_label = user_email or f"Suspeito {player_id}"
                     await broadcast(room_id, {
                         "type": "chat",
-                        "player_id": f"Suspeito {player_id}",
+                        "player_id": sender_label,
                         "content": data.get("content", "Realizou uma ação")
                     })
             except Exception as e:
                 # Se for texto puro, encapsula no padrão
+                sender_label = user_email or f"Suspeito {player_id}"
                 await broadcast(room_id, {
                     "type": "chat",
-                    "player_id": f"Suspeito {player_id}",
+                    "player_id": sender_label,
                     "content": msg
                 })
     except WebSocketDisconnect:
