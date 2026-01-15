@@ -87,7 +87,19 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('jwt_token', data.access_token);
       setToken(data.access_token);
       setIsAuthenticated(true);
-      setUser({ email: email });
+      setUser({ email });
+
+      // Valida e carrega dados do usuário via /auth/me
+      const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${data.access_token}`,
+        },
+      });
+      if (meResponse.ok) {
+        const meData = await meResponse.json();
+        setUser({ email: meData.email });
+      }
+
       navigate('/lobby');
     } catch (err) {
       if (ALLOW_MOCK_AUTH) {
