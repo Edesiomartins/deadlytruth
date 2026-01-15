@@ -27,11 +27,11 @@ export default function Register() {
 
   return (
     <AuthLayout>
-      <h2 className="text-lg text-gray-300 mb-6 text-center">
-        Crie sua conta para entrar
+      <h2 className="text-sm text-gray-400 mb-8 text-center tracking-widest uppercase">
+        Criar identidade
       </h2>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label className="block text-sm text-gray-400 mb-1">
             Email

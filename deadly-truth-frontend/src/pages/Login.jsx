@@ -17,11 +17,11 @@ export default function Login() {
 
   return (
     <AuthLayout>
-      <h2 className="text-lg text-gray-300 mb-6 text-center">
-        Acesso seguro ao jogo
+      <h2 className="text-sm text-gray-400 mb-8 text-center tracking-widest uppercase">
+        Acesso restrito
       </h2>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} className="space-y-6">
         <div>
           <label className="block text-sm font-medium tracking-wide text-gray-300 mb-2">
             Email

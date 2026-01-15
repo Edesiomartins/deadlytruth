@@ -5,12 +5,12 @@ export default function GameInput(props) {
       {...rest}
       className={`
         w-full
-        px-4 py-3
-        rounded-lg
-        bg-neutral-200/90
-        text-black
+        px-5 py-4
+        rounded-xl
+        bg-neutral-800
+        text-gray-100
         placeholder-gray-400
-        border border-neutral-600
+        border border-neutral-700
         focus:outline-none
         focus:ring-2
         focus:ring-red-700
