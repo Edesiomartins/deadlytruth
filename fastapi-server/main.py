@@ -70,6 +70,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://deadlytruth-frontend-production.up.railway.app",
+        "https://deadlytruth-production.up.railway.app",
         "http://localhost:5173",
     ],
     allow_credentials=True,
