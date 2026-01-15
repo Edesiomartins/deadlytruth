@@ -62,19 +62,7 @@ body {
     margin: 0;
 }
 
-/* FORÇA TODO TEXTO A SER CLARO POR PADRÃO */
-* {
-    color: var(--color-off-white) !important;
-}
-
-/* EXCEÇÕES PARA CORES DE DESTAQUE */
-.text-red-500, .text-red-600, .text-red-700 {
-    color: var(--color-red-accent) !important;
-}
-
-.text-amber-400, .text-amber-500 {
-    color: var(--color-gold-aged) !important;
-}
+/* Cores padrão para melhor compatibilidade com Tailwind */
 
 /* --- 4. Tipografia --- */
 h1, h2, h3, h4, h5, h6 {
