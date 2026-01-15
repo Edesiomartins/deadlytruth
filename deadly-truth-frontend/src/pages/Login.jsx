@@ -25,7 +25,7 @@ export default function Login() {
         <p className="text-center text-sm text-gray-400 mb-6">
           Acesso seguro ao jogo
         </p>
-        <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+        <form onSubmit={handleSubmit} className="flex flex-col gap-6">
           <input
             type="email"
             name="email"
