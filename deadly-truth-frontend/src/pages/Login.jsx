@@ -21,7 +21,7 @@ export default function Login() {
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm text-gray-400 mb-1">
+          <label className="block text-sm font-medium tracking-wide text-gray-300 mb-2">
             Email
           </label>
           <GameInput
@@ -33,7 +33,7 @@ export default function Login() {
         </div>
 
         <div>
-          <label className="block text-sm text-gray-400 mb-1">
+          <label className="block text-sm font-medium tracking-wide text-gray-300 mb-2">
             Senha
           </label>
           <GameInput

@@ -9,7 +9,17 @@ export default function Register() {
   function handleSubmit(e) {
     e.preventDefault();
     const form = new FormData(e.target);
-    register(form.get("email"), form.get("password"));
+
+    const email = form.get("email");
+    const password = form.get("password");
+    const confirm = form.get("confirm");
+
+    if (password !== confirm) {
+      alert("As senhas não conferem");
+      return;
+    }
+
+    register(email, password);
   }
 
   return (
