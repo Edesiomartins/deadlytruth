@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import suspenseBg from "../assets/images/login-hero.png";
 
 export default function Login() {
   const { login, loading, error } = useAuth();
@@ -11,8 +12,13 @@ export default function Login() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-black px-4">
-      <div className="w-full max-w-md bg-neutral-900 p-8 rounded-2xl shadow-2xl border border-neutral-800">
+    <div className="min-h-screen relative flex items-center justify-center bg-black px-4">
+      <div
+        className="absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: `url(${suspenseBg})` }}
+      />
+      <div className="absolute inset-0 bg-black/70" />
+      <div className="relative z-10 w-full max-w-md bg-neutral-900/90 backdrop-blur p-8 rounded-2xl shadow-2xl border border-neutral-800">
         <h1 className="text-center text-3xl font-bold tracking-widest text-gray-100 mb-2">
           DEADLY TRUTH
         </h1>
@@ -25,7 +31,6 @@ export default function Login() {
             name="email"
             placeholder="Email"
             className="block w-full px-4 py-3 rounded-lg bg-neutral-800 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-700"
-            style={{ display: "block" }}
             required
           />
           <input
@@ -33,7 +38,6 @@ export default function Login() {
             name="password"
             placeholder="Senha"
             className="block w-full px-4 py-3 rounded-lg bg-neutral-800 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-red-700"
-            style={{ display: "block" }}
             required
           />
           {error && <p className="text-red-400 text-sm text-center">{error}</p>}
