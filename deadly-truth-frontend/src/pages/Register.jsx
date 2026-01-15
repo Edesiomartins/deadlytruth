@@ -33,7 +33,7 @@ export default function Register() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm text-gray-400 mb-1">
+          <label className="block text-sm tracking-widest text-red-400 mb-2 uppercase">
             Email
           </label>
           <GameInput
@@ -45,7 +45,7 @@ export default function Register() {
         </div>
 
         <div>
-          <label className="block text-sm text-gray-400 mb-1">
+          <label className="block text-sm tracking-widest text-red-400 mb-2 uppercase">
             Senha
           </label>
           <div className="relative">
@@ -76,7 +76,7 @@ export default function Register() {
         </div>
 
         <div>
-          <label className="block text-sm text-gray-400 mb-1">
+          <label className="block text-sm tracking-widest text-red-400 mb-2 uppercase">
             Confirmar senha
           </label>
           <div className="relative">

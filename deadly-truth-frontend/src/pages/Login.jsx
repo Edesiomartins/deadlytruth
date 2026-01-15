@@ -4,6 +4,7 @@ import { useAuth } from "../context/AuthContext";
 import AuthLayout from "../components/AuthLayout";
 import GameInput from "../components/GameInput";
 import GameButton from "../components/GameButton";
+import loginHero from "../assets/images/login-hero.png";
 
 export default function Login() {
   const { login, loading, error } = useAuth();
@@ -16,14 +17,14 @@ export default function Login() {
   }
 
   return (
-    <AuthLayout>
+    <AuthLayout backgroundImage={loginHero}>
       <h2 className="text-sm text-gray-400 mb-8 text-center tracking-widest uppercase">
         Acesso restrito
       </h2>
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-sm font-medium tracking-wide text-gray-300 mb-2">
+          <label className="block text-sm tracking-widest text-red-400 mb-2 uppercase">
             Email
           </label>
           <GameInput
@@ -35,7 +36,7 @@ export default function Login() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium tracking-wide text-gray-300 mb-2">
+          <label className="block text-sm tracking-widest text-red-400 mb-2 uppercase">
             Senha
           </label>
           <div className="relative">
