@@ -66,14 +66,12 @@ def on_startup():
     init_db()
 
 # Habilita CORS para que o frontend possa acessar o backend
-# Railway fornece a URL via variável de ambiente RAILWAY_PUBLIC_DOMAIN ou RAILWAY_STATIC_URL
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "*").split(",")
-if allowed_origins == ["*"]:
-    print("⚠️ CORS configurado para aceitar todas as origens. Configure ALLOWED_ORIGINS no Railway para produção.")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=[
+        "https://deadlytruth-frontend-production.up.railway.app",
+        "http://localhost:5173",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
