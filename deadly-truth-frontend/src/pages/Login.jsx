@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import suspenseBg from "../assets/images/login-hero.png";
+import suspenseBg from "../assets/images/login-hero.png.png";
 
 export default function Login() {
   const { login, loading, error } = useAuth();

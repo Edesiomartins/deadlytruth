@@ -3,7 +3,7 @@ import AuthLayout from "../components/AuthLayout";
 import GameInput from "../components/GameInput";
 import GameButton from "../components/GameButton";
 import { useAuth } from "../context/AuthContext";
-import suspenseBg from "../assets/images/login-hero.png";
+import suspenseBg from "../assets/images/login-hero.png.png";
 
 export default function Register() {
   const { register, loading, error } = useAuth();
