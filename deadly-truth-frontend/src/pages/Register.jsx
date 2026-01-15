@@ -32,7 +32,7 @@ export default function Register() {
 
   return (
     <AuthLayout>
-      <form onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4">
         <GameInput type="email" name="email" placeholder="Email" required />
         <GameInput type="password" name="password" placeholder="Senha" required />
         <GameInput
