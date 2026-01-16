@@ -169,6 +169,244 @@ def groq_generate(prompt: str, system: str = None) -> str:
     return ai_generate(prompt, system)
 
 
+# ======== Sistema de Bots ========
+
+BOT_PERSONALITIES = {
+    "Shadow_Hunter": {
+        "personality": "Detetive experiente, analítico e direto. Faz perguntas incisivas e observa cada detalhe.",
+        "style": "formal e investigativo",
+        "traits": ["observador", "lógico", "desconfiado"]
+    },
+    "Night_Stalker": {
+        "personality": "Misterioso e reservado. Fala pouco mas quando fala é profundo. Suspeito em potencial.",
+        "style": "enigmático e sussurrado",
+        "traits": ["silencioso", "calculista", "misterioso"]
+    },
+    "Dark_Phoenix": {
+        "personality": "Testemunha nervosa que viu algo importante. Hesitante mas honesta.",
+        "style": "nervoso e hesitante",
+        "traits": ["assustado", "sincero", "detalhista"]
+    },
+    "Silent_Reaper": {
+        "personality": "Figura sombria com passado duvidoso. Respostas curtas e ambíguas.",
+        "style": "lacônico e sombrio",
+        "traits": ["lacônico", "ameaçador", "enigmático"]
+    },
+    "Ghost_Whisper": {
+        "personality": "Informante que conhece os segredos de todos. Gosta de insinuações.",
+        "style": "insinuante e provocativo",
+        "traits": ["provocador", "conhecedor", "astuto"]
+    },
+    "Blood_Moon": {
+        "personality": "Intenso e dramático. Vê conspiração em tudo. Extremamente emocional.",
+        "style": "dramático e intenso",
+        "traits": ["emotivo", "paranóico", "teatral"]
+    },
+    "Crimson_Blade": {
+        "personality": "Mercenário pragmático. Vai direto ao ponto. Não tem paciência para rodeios.",
+        "style": "direto e agressivo",
+        "traits": ["impaciente", "pragmático", "rude"]
+    },
+    "Phantom_Eyes": {
+        "personality": "Observador silencioso que nota tudo. Calmo e filosófico.",
+        "style": "reflexivo e calmo",
+        "traits": ["filosófico", "paciente", "sábio"]
+    },
+    "Raven_Soul": {
+        "personality": "Médium espiritual que sente energias. Místico e intuitivo.",
+        "style": "místico e etéreo",
+        "traits": ["intuitivo", "espiritual", "sensível"]
+    },
+    "Death_Dealer": {
+        "personality": "Ex-criminoso reformado. Conhece o submundo. Cínico mas útil.",
+        "style": "cínico e experiente",
+        "traits": ["cínico", "experiente", "street-smart"]
+    }
+}
+
+
+async def bot_generate_response(bot_name: str, context: dict, question: str = None) -> str:
+    """
+    Gera resposta de um bot usando IA baseado em sua personalidade
+    
+    Args:
+        bot_name: Nome do bot
+        context: Contexto do caso (descrição, evidências, chat history)
+        question: Pergunta específica (se houver)
+    """
+    personality = BOT_PERSONALITIES.get(bot_name, BOT_PERSONALITIES["Silent_Reaper"])
+    
+    # Monta o contexto do caso
+    case_desc = context.get("case_description", "Mistério desconhecido")
+    chat_history = context.get("chat_history", [])
+    evidences = context.get("evidences", [])
+    
+    # Histórico recente do chat (últimas 5 mensagens)
+    recent_chat = "\n".join([
+        f"{msg.get('player', 'Unknown')}: {msg.get('text', '')}"
+        for msg in chat_history[-5:]
+    ]) if chat_history else "Nenhuma conversa ainda."
+    
+    # Evidências disponíveis
+    evidence_list = "\n".join([
+        f"- {ev}" for ev in evidences
+    ]) if evidences else "Nenhuma evidência revelada ainda."
+    
+    # Sistema: Definição da personalidade
+    system_prompt = f"""Você é {bot_name}, um personagem em um jogo de mistério.
+
+PERSONALIDADE: {personality['personality']}
+ESTILO DE FALA: {personality['style']}
+CARACTERÍSTICAS: {', '.join(personality['traits'])}
+
+REGRAS IMPORTANTES:
+1. Responda SEMPRE em português BR
+2. Mantenha sua personalidade única em cada resposta
+3. Seja BREVE - máximo 2-3 frases curtas
+4. Não quebre o personagem nunca
+5. Interaja naturalmente com outros jogadores
+6. Use as evidências e contexto para suas respostas
+7. Adicione suspense e mistério quando apropriado
+"""
+    
+    # Prompt: Contexto + Pergunta
+    if question:
+        user_prompt = f"""CASO: {case_desc}
+
+EVIDÊNCIAS REVELADAS:
+{evidence_list}
+
+CONVERSA RECENTE:
+{recent_chat}
+
+PERGUNTA/SITUAÇÃO: {question}
+
+Responda como {bot_name} de forma natural e breve (máx 2-3 frases):"""
+    else:
+        # Bot falando espontaneamente
+        user_prompt = f"""CASO: {case_desc}
+
+EVIDÊNCIAS REVELADAS:
+{evidence_list}
+
+CONVERSA RECENTE:
+{recent_chat}
+
+É sua vez de falar. Faça uma observação, pergunta ou comentário relevante como {bot_name} (máx 2-3 frases):"""
+    
+    # Gera resposta usando IA
+    try:
+        response = ai_generate(user_prompt, system=system_prompt)
+        # Limpa a resposta (remove aspas extras, etc)
+        response = response.strip().strip('"\'')
+        return response
+    except Exception as e:
+        print(f"❌ Erro ao gerar resposta do bot {bot_name}: {e}")
+        # Fallback: resposta genérica baseada na personalidade
+        fallbacks = {
+            "Shadow_Hunter": "Hmm... preciso investigar isso mais a fundo.",
+            "Night_Stalker": "...",
+            "Dark_Phoenix": "Eu... eu não sei o que dizer...",
+            "Silent_Reaper": "Irrelevante.",
+            "Ghost_Whisper": "Ah, isso é interessante...",
+            "Blood_Moon": "Isso não pode ser coincidência!",
+            "Crimson_Blade": "Vamos ao ponto.",
+            "Phantom_Eyes": "Deixe-me refletir sobre isso.",
+            "Raven_Soul": "Sinto uma energia estranha aqui...",
+            "Death_Dealer": "Já vi isso antes."
+        }
+        return fallbacks.get(bot_name, "Sem comentários.")
+
+
+async def process_bot_turn(room_id: str):
+    """
+    Processa automaticamente o turno de um bot
+    - Aguarda 2-5 segundos (parecer natural)
+    - Gera resposta usando IA
+    - Envia para todos os jogadores
+    - Avança para próximo turno
+    """
+    if room_id not in ROOMS:
+        return
+    
+    room = ROOMS[room_id]
+    players = room.get("players", [])
+    current_turn = room.get("current_turn", 0)
+    
+    if not players or current_turn >= len(players):
+        return
+    
+    current_player = players[current_turn]
+    
+    # Verifica se é um bot
+    if not current_player.get("is_bot", False):
+        return
+    
+    bot_name = current_player.get("name", "Bot")
+    
+    # Aguarda 2-5 segundos para parecer natural
+    import asyncio
+    import random
+    await asyncio.sleep(random.uniform(2, 5))
+    
+    # Prepara o contexto para o bot
+    context = {
+        "case_description": room.get("case", {}).get("descricao", ""),
+        "chat_history": room.get("chat", []),
+        "evidences": room.get("case", {}).get("evidencias", [])
+    }
+    
+    # Gera resposta do bot
+    bot_response = await bot_generate_response(bot_name, context)
+    
+    # Adiciona a mensagem ao chat
+    message = {
+        "player": bot_name,
+        "text": bot_response,
+        "is_bot": True,
+        "timestamp": datetime.now().isoformat()
+    }
+    room["chat"].append(message)
+    
+    # Envia para todos os jogadores conectados
+    if room_id in CONNECTIONS:
+        for ws in CONNECTIONS[room_id]:
+            try:
+                await ws.send_json({
+                    "type": "bot_message",
+                    "player": bot_name,
+                    "message": bot_response,
+                    "is_bot": True
+                })
+            except:
+                pass
+    
+    # Aguarda 1 segundo antes de passar o turno
+    await asyncio.sleep(1)
+    
+    # Avança para próximo turno
+    room["current_turn"] = (current_turn + 1) % len(players)
+    
+    # Notifica novo turno
+    if room_id in CONNECTIONS:
+        next_player = players[room["current_turn"]]
+        for ws in CONNECTIONS[room_id]:
+            try:
+                await ws.send_json({
+                    "type": "turn_change",
+                    "current_player": next_player.get("name"),
+                    "is_bot": next_player.get("is_bot", False),
+                    "turn_index": room["current_turn"]
+                })
+            except:
+                pass
+    
+    # Se o próximo também for bot, processa recursivamente
+    next_player = players[room["current_turn"]]
+    if next_player.get("is_bot", False):
+        await process_bot_turn(room_id)
+
+
 def extract_json_from_string(text, validate_with_pydantic=None):
     """Extrai JSON válido de uma string com blocos markdown ```json...```"""
     try:
@@ -439,15 +677,26 @@ async def game_loop(room_id: str):
 
     # 2. Inicia a sequência de turnos
     while room.get("game_active", False):
-        for idx, player_id in enumerate(participantes):
+        for idx, player_data in enumerate(participantes):
             room["current_turn"] = idx
+            
+            # Verifica se é um bot
+            is_bot = player_data.get("isBot", False) if isinstance(player_data, dict) else False
+            player_name = player_data.get("name", f"Jogador {idx+1}") if isinstance(player_data, dict) else str(player_data)
             
             await broadcast(room_id, {
                 "type": "turn_start",
-                "player": player_id,
+                "player": player_name,
+                "is_bot": is_bot,
                 "time_limit": 120
             })
             
+            # Se for bot, processa automaticamente
+            if is_bot:
+                await process_bot_turn(room_id)
+                continue
+            
+            # Se for jogador humano, aguarda ação
             if room_id in GAME_EVENTS:
                 GAME_EVENTS[room_id]["player_action_event"].clear()
                 try:
@@ -553,6 +802,12 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 
                 if msg_type == "start":
                     # Lógica de início manual
+                    # Recebe a lista de jogadores (incluindo bots) do frontend
+                    players_data = data.get("players", [])
+                    if players_data:
+                        room["players"] = players_data
+                        print(f"🎮 Jogadores recebidos: {len(players_data)} ({sum(1 for p in players_data if p.get('isBot')) } bots)")
+                    
                     num_atual = len(room.get("players", []))
                     if num_atual >= 3:  # Mudado de 6 para 3
                         asyncio.create_task(game_loop(room_id))
