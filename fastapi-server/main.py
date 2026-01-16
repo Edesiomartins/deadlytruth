@@ -4,6 +4,7 @@ import re
 import asyncio
 from pathlib import Path
 from groq import Groq  # pyright: ignore[reportMissingImports]
+from openai import OpenAI  # pyright: ignore[reportMissingImports]
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
@@ -80,8 +81,9 @@ app.add_middleware(
 
 app.include_router(auth_router)
 
-# Cliente Groq (inicializado lazy)
-_client = None
+# Clientes AI (inicializados lazy)
+_groq_client = None
+_deepseek_client = None
 
 # Armazenamento em memória (em produção, usar Redis ou DB)
 ROOMS = {}  # {room_id: {"case": {...}, "chat": [...], "nivel": "...", "players": [...], "current_turn": int, "game_active": bool}}
@@ -93,60 +95,78 @@ GAME_EVENTS = {}  # {room_id: {"player_action_event": asyncio.Event, "current_pl
 
 def get_groq_client():
     """Obtém ou cria o cliente Groq (lazy initialization)"""
-    global _client
-    if _client is None:
+    global _groq_client
+    if _groq_client is None:
         api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
-            # Verifica se o arquivo .env existe
-            env_file = Path(__file__).parent / ".env"
-            if env_file.exists():
-                raise ValueError(
-                    f"GROQ_API_KEY não encontrada no arquivo .env (arquivo existe em: {env_file}). "
-                    "Verifique se a chave está definida corretamente no formato: GROQ_API_KEY=sua-chave-aqui"
-                )
-            else:
-                raise ValueError(
-                    f"Arquivo .env não encontrado em: {env_file}. "
-                    "Crie o arquivo .env na pasta fastapi-server com: GROQ_API_KEY=sua-chave-aqui"
-                )
-        _client = Groq(api_key=api_key)
-    return _client
+            raise ValueError("GROQ_API_KEY não encontrada no .env")
+        _groq_client = Groq(api_key=api_key)
+    return _groq_client
+
+
+def get_deepseek_client():
+    """Obtém ou cria o cliente DeepSeek (lazy initialization)"""
+    global _deepseek_client
+    if _deepseek_client is None:
+        api_key = os.getenv("DEEPSEEK_API_KEY")
+        if not api_key:
+            raise ValueError("DEEPSEEK_API_KEY não encontrada no .env")
+        _deepseek_client = OpenAI(
+            api_key=api_key,
+            base_url="https://api.deepseek.com"
+        )
+    return _deepseek_client
+
+
+def ai_generate(prompt: str, system: str = None) -> str:
+    """
+    Gera resposta usando o provedor de IA configurado (Groq ou DeepSeek)
+    Provedor é escolhido via variável de ambiente AI_PROVIDER (groq ou deepseek)
+    Padrão: groq
+    """
+    provider = os.getenv("AI_PROVIDER", "groq").lower()
+    
+    messages = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+    
+    try:
+        if provider == "deepseek":
+            # Usa DeepSeek-V3 (mais recente e poderoso)
+            print(f"🤖 Usando DeepSeek-V3...")
+            client = get_deepseek_client()
+            completion = client.chat.completions.create(
+                model="deepseek-chat",  # Usa o modelo mais recente
+                messages=messages,
+                temperature=0.8,
+                max_tokens=2048
+            )
+            return completion.choices[0].message.content or ""
+        else:
+            # Usa Groq (padrão)
+            print(f"🤖 Usando Groq (Llama 3.3 70B)...")
+            client = get_groq_client()
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=1,
+                max_completion_tokens=1024,
+                top_p=1,
+                stream=False,
+                stop=None
+            )
+            return completion.choices[0].message.content or ""
+    except ValueError as e:
+        return f"Erro de configuração ({provider}): {str(e)}"
+    except Exception as e:
+        print(f"❌ Erro ao chamar {provider.upper()} API: {e}")
+        return f"Erro ao gerar resposta com {provider}: {str(e)}"
 
 
 def groq_generate(prompt: str, system: str = None) -> str:
-    """Gera resposta usando Groq com llama-3.3-70b-versatile"""
-    messages = []
-    
-    # Adiciona mensagem do sistema se fornecida
-    if system:
-        messages.append({
-            "role": "system",
-            "content": system
-        })
-    
-    # Adiciona mensagem do usuário
-    messages.append({
-        "role": "user",
-        "content": prompt
-    })
-    
-    try:
-        client = get_groq_client()
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=1,
-            max_completion_tokens=1024,
-            top_p=1,
-            stream=False,
-            stop=None
-        )
-        
-        return completion.choices[0].message.content or ""
-    except ValueError as e:
-        return f"Erro de configuração: {str(e)}"
-    except Exception as e:
-        return f"Erro ao gerar resposta: {str(e)}"
+    """DEPRECATED: Use ai_generate() - Mantido por compatibilidade"""
+    return ai_generate(prompt, system)
 
 
 def extract_json_from_string(text, validate_with_pydantic=None):
