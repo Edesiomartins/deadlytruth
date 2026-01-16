@@ -1,6 +1,9 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function Register() {
+  const { register } = useAuth();
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [email, setEmail] = useState("");
@@ -9,42 +12,46 @@ export default function Register() {
 
   function handleSubmit(e) {
     e.preventDefault();
+    
     if (password !== confirm) {
       alert("As senhas não conferem");
       return;
     }
-    console.log("Registrando:", email);
+
+    register(email, password);
   }
 
   return (
     <div className="min-h-screen bg-black relative overflow-hidden flex items-center justify-center">
+      {/* Background Effect */}
       <div className="absolute inset-0 bg-gradient-to-br from-red-950/20 via-black to-purple-950/20"></div>
       
+      {/* Animated Grid */}
       <div className="absolute inset-0 opacity-20">
-        <div
-          className="absolute inset-0"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(220, 38, 38, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(220, 38, 38, 0.1) 1px, transparent 1px)",
-            backgroundSize: "50px 50px",
-          }}
-        ></div>
+        <div className="absolute inset-0" style={{
+          backgroundImage: `linear-gradient(rgba(220, 38, 38, 0.1) 1px, transparent 1px),
+                           linear-gradient(90deg, rgba(220, 38, 38, 0.1) 1px, transparent 1px)`,
+          backgroundSize: '50px 50px'
+        }}></div>
       </div>
 
+      {/* Glowing Orbs */}
       <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-red-600/10 rounded-full blur-3xl animate-pulse"></div>
-      <div
-        className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl animate-pulse"
-        style={{ animationDelay: "1s" }}
-      ></div>
+      <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-purple-600/10 rounded-full blur-3xl animate-pulse" style={{animationDelay: '1s'}}></div>
 
+      {/* Main Container */}
       <div className="relative z-10 w-full max-w-md px-6">
+        {/* Card */}
         <div className="backdrop-blur-xl bg-black/40 border border-red-900/30 rounded-2xl shadow-2xl shadow-red-900/20 p-8 relative overflow-hidden">
+          {/* Top Accent Line */}
           <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-red-500 to-transparent"></div>
           
+          {/* Scanline Effect */}
           <div className="absolute inset-0 opacity-5 pointer-events-none">
             <div className="h-full w-full bg-gradient-to-b from-transparent via-red-500/20 to-transparent animate-pulse"></div>
           </div>
 
+          {/* Header */}
           <div className="text-center mb-8">
             <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-red-950/50 border border-red-500/30 mb-4">
               <svg className="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -57,7 +64,9 @@ export default function Register() {
             <div className="mt-2 h-px w-24 mx-auto bg-gradient-to-r from-transparent via-red-500/50 to-transparent"></div>
           </div>
 
+          {/* Form Fields */}
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Email */}
             <div className="group">
               <label className="block text-xs tracking-widest text-red-400/70 mb-2 uppercase font-light">
                 Email
@@ -75,6 +84,7 @@ export default function Register() {
               </div>
             </div>
 
+            {/* Password */}
             <div className="group">
               <label className="block text-xs tracking-widest text-red-400/70 mb-2 uppercase font-light">
                 Senha
@@ -107,6 +117,7 @@ export default function Register() {
               </div>
             </div>
 
+            {/* Confirm Password */}
             <div className="group">
               <label className="block text-xs tracking-widest text-red-400/70 mb-2 uppercase font-light">
                 Confirmar Senha
@@ -139,6 +150,7 @@ export default function Register() {
               </div>
             </div>
 
+            {/* Submit Button */}
             <button
               type="submit"
               className="relative w-full py-3 px-6 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-medium tracking-wider uppercase text-sm rounded-lg transition-all duration-300 shadow-lg shadow-red-900/50 hover:shadow-red-900/70 hover:scale-[1.02] active:scale-[0.98] overflow-hidden group"
@@ -148,16 +160,18 @@ export default function Register() {
             </button>
           </form>
 
+          {/* Footer Link */}
           <div className="mt-6 pt-6 border-t border-red-900/20">
             <p className="text-center text-sm text-gray-500">
               Já tem conta?{" "}
-              <a href="/login" className="text-red-400 hover:text-red-300 transition-colors font-medium">
+              <Link to="/login" className="text-red-400 hover:text-red-300 transition-colors font-medium">
                 Entrar
-              </a>
+              </Link>
             </p>
           </div>
         </div>
 
+        {/* Bottom Glow */}
         <div className="absolute -bottom-20 left-1/2 -translate-x-1/2 w-3/4 h-20 bg-red-500/20 blur-3xl rounded-full"></div>
       </div>
     </div>

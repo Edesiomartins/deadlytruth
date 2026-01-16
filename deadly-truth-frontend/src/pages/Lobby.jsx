@@ -1,6 +1,11 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "../context/AuthContext";
 
 export default function Lobby() {
+  const { logout, user } = useAuth();
+  const navigate = useNavigate();
+  
   const [players] = useState([
     { id: 1, name: "Shadow_Hunter", status: "online", role: "Detective" },
     { id: 2, name: "Night_Stalker", status: "online", role: "Suspect" },
@@ -26,6 +31,11 @@ export default function Lobby() {
       }]);
       setNewMessage("");
     }
+  };
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
   };
 
   return (
@@ -54,11 +64,14 @@ export default function Lobby() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white tracking-wide">Sala Geral</h1>
-                <p className="text-xs text-red-400/70 tracking-wider">4 jogadores online</p>
+                <p className="text-xs text-red-400/70 tracking-wider">{players.length} jogadores online</p>
               </div>
             </div>
             
-            <button className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-lg text-red-400 text-sm font-medium tracking-wide transition-all">
+            <button 
+              onClick={handleLogout}
+              className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-500/30 rounded-lg text-red-400 text-sm font-medium tracking-wide transition-all"
+            >
               Sair
             </button>
           </div>
@@ -123,7 +136,7 @@ export default function Lobby() {
                 
                 <div className="flex items-center justify-center gap-8 mb-8">
                   <div className="text-center">
-                    <div className="text-3xl font-bold text-red-400">4</div>
+                    <div className="text-3xl font-bold text-red-400">{players.length}</div>
                     <div className="text-xs text-gray-500 uppercase tracking-wider">Online</div>
                   </div>
                   <div className="w-px h-12 bg-red-900/30"></div>
@@ -138,7 +151,10 @@ export default function Lobby() {
                   </div>
                 </div>
                 
-                <button className="px-8 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-medium tracking-wider uppercase text-sm rounded-lg transition-all duration-300 shadow-lg shadow-red-900/50 hover:shadow-red-900/70 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                <button 
+                  className="px-8 py-3 bg-gradient-to-r from-red-600 to-red-700 hover:from-red-500 hover:to-red-600 text-white font-medium tracking-wider uppercase text-sm rounded-lg transition-all duration-300 shadow-lg shadow-red-900/50 hover:shadow-red-900/70 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed" 
+                  disabled={players.length < 6}
+                >
                   Iniciar Partida
                 </button>
               </div>
