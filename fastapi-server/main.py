@@ -3,9 +3,10 @@ import json
 import re
 import asyncio
 from pathlib import Path
+from datetime import datetime
 from groq import Groq  # pyright: ignore[reportMissingImports]
 from openai import OpenAI  # pyright: ignore[reportMissingImports]
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect  # pyright: ignore[reportMissingImports]
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response  # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
@@ -67,17 +68,49 @@ def on_startup():
     init_db()
 
 # Habilita CORS para que o frontend possa acessar o backend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
+# Permite origens dinâmicas via variável de ambiente ou lista fixa
+allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
+if allowed_origins_env:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",")]
+    print(f"🌐 CORS: Usando origens da variável ALLOWED_ORIGINS: {allowed_origins}")
+else:
+    allowed_origins = [
         "https://deadlytruth-frontend-production.up.railway.app",
         "https://deadlytruth-production.up.railway.app",
         "http://localhost:5173",
-    ],
+        "http://localhost:3000",
+    ]
+    print(f"🌐 CORS: Usando origens padrão: {allowed_origins}")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
     allow_headers=["*"],
+    expose_headers=["*"],
+    max_age=3600,  # Cache preflight por 1 hora
 )
+
+# Middleware adicional para garantir headers CORS em todas as respostas
+@app.middleware("http")
+async def add_cors_headers(request: Request, call_next):
+    """Garante que headers CORS sejam sempre enviados"""
+    origin = request.headers.get("origin")
+    
+    # Verifica se a origem está permitida
+    if origin and origin in allowed_origins:
+        response = await call_next(request)
+        # Adiciona headers CORS se ainda não estiverem presentes
+        if "access-control-allow-origin" not in response.headers:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+        return response
+    else:
+        response = await call_next(request)
+        return response
 
 app.include_router(auth_router)
 
@@ -541,6 +574,19 @@ def debug_env():
     }
 
 
+@app.get("/debug/cors")
+def debug_cors(request: Request):
+    """Endpoint de debug para verificar configuração CORS"""
+    origin = request.headers.get("origin", "Nenhuma origem enviada")
+    return {
+        "allowed_origins": allowed_origins,
+        "request_origin": origin,
+        "origin_allowed": origin in allowed_origins if origin != "Nenhuma origem enviada" else None,
+        "allowed_methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "credentials_allowed": True
+    }
+
+
 @app.post("/case/new")
 async def create_case(req: CreateCaseRequest):
     """Cria um novo caso criminal"""
@@ -688,6 +734,7 @@ async def game_loop(room_id: str):
                 "type": "turn_start",
                 "player": player_name,
                 "is_bot": is_bot,
+                "turn_index": idx,
                 "time_limit": 120
             })
             
@@ -705,7 +752,11 @@ async def game_loop(room_id: str):
                         timeout=120.0
                     )
                 except asyncio.TimeoutError:
-                    await broadcast(room_id, {"type": "time_out", "player": player_id})
+                    await broadcast(room_id, {
+                        "type": "time_out", 
+                        "player": player_name,
+                        "turn_index": idx
+                    })
 
     room["game_active"] = False
 
@@ -817,16 +868,30 @@ async def ws_room(websocket: WebSocket, room_id: str):
                             "msg": f"Mínimo de 3 jogadores necessário. Atual: {num_atual}"
                         }))
                 
-                elif msg_type == "action":
+                elif msg_type == "message" or msg_type == "action":
+                    # Processa mensagem de chat ou ação do jogador
                     if room_id in GAME_EVENTS:
                         GAME_EVENTS[room_id]["player_action_event"].set()
                     
-                    # Envia como um chat normal para aparecer na lista
-                    sender_label = user_email or f"Suspeito {player_id}"
+                    # Envia como uma mensagem de chat para aparecer na lista
+                    sender_label = user_email.split("@")[0] if user_email else f"Jogador {player_id}"
+                    message_text = data.get("text") or data.get("content", "Realizou uma ação")
+                    
+                    # Adiciona ao histórico do chat da sala
+                    if room_id in ROOMS:
+                        ROOMS[room_id].setdefault("chat", []).append({
+                            "player": sender_label,
+                            "text": message_text,
+                            "is_bot": False,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                    
+                    # Broadcast para todos os jogadores
                     await broadcast(room_id, {
-                        "type": "chat",
-                        "player_id": sender_label,
-                        "content": data.get("content", "Realizou uma ação")
+                        "type": "player_message",
+                        "player": sender_label,
+                        "message": message_text,
+                        "is_bot": False
                     })
             except Exception as e:
                 # Se for texto puro, encapsula no padrão

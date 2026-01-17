@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
@@ -10,6 +10,10 @@ export default function Lobby() {
     { id: 1, name: user?.email?.split('@')[0] || "Você", status: "online", role: "Detective", isBot: false },
   ]);
   
+  const [ws, setWs] = useState(null);
+  const [connected, setConnected] = useState(false);
+  const [roomId] = useState("sala-geral"); // ID da sala
+  
   const [messages, setMessages] = useState([
     { id: 1, user: "Shadow_Hunter", text: "Alguém pronto para começar?", time: "18:45" },
     { id: 2, user: "Night_Stalker", text: "Estou pronto. Vai ser intenso...", time: "18:46" },
@@ -17,6 +21,49 @@ export default function Lobby() {
   ]);
   
   const [newMessage, setNewMessage] = useState("");
+
+  // Conecta ao WebSocket ao entrar no lobby
+  useEffect(() => {
+    const apiUrl = import.meta.env.VITE_API_URL || "https://deadlytruth-backend-production.up.railway.app";
+    const wsUrl = apiUrl.replace(/^http/, 'ws');
+    const token = localStorage.getItem('jwt_token');
+    
+    const websocket = new WebSocket(`${wsUrl}/ws/${roomId}?token=${token}`);
+    
+    websocket.onopen = () => {
+      console.log("🔌 Conectado ao WebSocket");
+      setConnected(true);
+    };
+    
+    websocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        console.log("📨 Mensagem recebida:", data);
+        
+        if (data.type === "game_start") {
+          // Jogo começou! Navega para a tela do jogo
+          navigate(`/game/${roomId}`);
+        }
+      } catch (e) {
+        console.error("Erro ao processar mensagem:", e);
+      }
+    };
+    
+    websocket.onerror = (error) => {
+      console.error("❌ Erro no WebSocket:", error);
+    };
+    
+    websocket.onclose = () => {
+      console.log("🔌 Desconectado do WebSocket");
+      setConnected(false);
+    };
+    
+    setWs(websocket);
+    
+    return () => {
+      websocket.close();
+    };
+  }, [roomId, navigate]);
 
   const sendMessage = () => {
     if (newMessage.trim()) {
@@ -27,6 +74,18 @@ export default function Lobby() {
         time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
       }]);
       setNewMessage("");
+    }
+  };
+
+  const handleStartGame = () => {
+    if (ws && connected && players.length >= 3) {
+      console.log("🎮 Enviando comando para iniciar jogo com", players.length, "jogadores");
+      ws.send(JSON.stringify({
+        type: "start",
+        players: players
+      }));
+    } else {
+      alert("Erro: WebSocket não conectado ou jogadores insuficientes");
     }
   };
 
@@ -229,15 +288,11 @@ export default function Lobby() {
                 </div>
                 
                 <button 
-                  onClick={() => {
-                    // TODO: Conectar ao WebSocket e enviar comando de início com lista de jogadores
-                    console.log("Iniciando partida com jogadores:", players);
-                    alert(`Partida iniciando com ${players.length} jogadores (${players.filter(p => p.isBot).length} bots)`);
-                  }}
+                  onClick={handleStartGame}
                   className="w-full px-8 py-3 bg-gradient-to-r from-primaryRed to-lightRed hover:from-accentRed hover:to-lightRed text-white font-medium tracking-wider uppercase text-sm rounded-lg transition-all duration-300 shadow-lg shadow-primaryRed/50 hover:shadow-accentRed/70 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed font-roboto" 
-                  disabled={players.length < 3}
+                  disabled={players.length < 3 || !connected}
                 >
-                  Iniciar Partida
+                  {connected ? "Iniciar Partida" : "Conectando..."}
                 </button>
               </div>
             </div>

@@ -5,6 +5,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import Lobby from './pages/Lobby';
+import Game from './pages/Game';
 
 const App = () => {
   return (
@@ -18,6 +19,14 @@ const App = () => {
             element={
               <ProtectedRoute>
                 <Lobby />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/game/:roomId"
+            element={
+              <ProtectedRoute>
+                <Game />
               </ProtectedRoute>
             }
           />
