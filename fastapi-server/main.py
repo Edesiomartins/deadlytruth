@@ -699,15 +699,35 @@ async def game_loop(room_id: str):
     
     await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
     
-    # Gerar o caso
+    # Gerar o caso com randomização
+    import random
+    cenarios = ["Hotel-Cassino", "Mansão", "Praia", "Parque", "Teatro"]
+    niveis = ["Iniciante", "Intermediário", "Avançado"]
+    
+    # Randomiza cenário e nível para cada jogo
+    cenario_escolhido = room.get("cenario") or random.choice(cenarios)
+    nivel_escolhido = room.get("nivel") or random.choice(niveis)
+    
+    # Adiciona um ID único para cada caso
+    import uuid
+    case_id_unique = f"CASE-{uuid.uuid4().hex[:8].upper()}"
+    
+    print(f"🎲 Gerando caso: {cenario_escolhido} - {nivel_escolhido} (ID: {case_id_unique})")
+    
     prompt_dinamico = CREATE_CASE_TEMPLATE.format(
-        cenario=room.get("cenario", "Hotel-Cassino"),
-        nivel=room.get("nivel", "Iniciante"),
+        cenario=cenario_escolhido,
+        nivel=nivel_escolhido,
         num_jogadores=num_jogadores
     )
     
-    case_json = groq_generate(prompt_dinamico, system=SYSTEM_GAME_MASTER)
+    case_json = ai_generate(prompt_dinamico, system=SYSTEM_GAME_MASTER)
     case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+    
+    # Garante que o case_id seja único
+    if not case_data.get("case_id") or case_data.get("case_id") == "ERRO":
+        case_data["case_id"] = case_id_unique
+    case_data["nivel"] = nivel_escolhido
+    case_data["cenario"] = cenario_escolhido
     
     # SALVAR NA SALA (Importante para quem entrar depois)
     room["case"] = case_data 
@@ -765,10 +785,21 @@ async def game_loop(room_id: str):
 async def ws_room(websocket: WebSocket, room_id: str):
     token = websocket.query_params.get("token")
     user_email = None
+    user_nickname = None
     if token:
         payload = decode_access_token(token)
         if payload:
             user_email = payload.get("sub")
+            # Busca nickname do usuário no banco
+            from database import SessionLocal
+            from models import User
+            db = SessionLocal()
+            try:
+                user = db.query(User).filter(User.email == user_email).first()
+                if user and user.nickname:
+                    user_nickname = user.nickname
+            finally:
+                db.close()
 
     require_auth_ws = os.getenv("REQUIRE_AUTH_WS", "false").lower() == "true"
     if require_auth_ws and not user_email:
@@ -874,7 +905,13 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         GAME_EVENTS[room_id]["player_action_event"].set()
                     
                     # Envia como uma mensagem de chat para aparecer na lista
-                    sender_label = user_email.split("@")[0] if user_email else f"Jogador {player_id}"
+                    # Prioriza nickname, depois email sem @, depois fallback
+                    if user_nickname:
+                        sender_label = user_nickname
+                    elif user_email:
+                        sender_label = user_email.split("@")[0]
+                    else:
+                        sender_label = f"Jogador {player_id}"
                     message_text = data.get("text") or data.get("content", "Realizou uma ação")
                     
                     # Adiciona ao histórico do chat da sala
@@ -895,7 +932,12 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     })
             except Exception as e:
                 # Se for texto puro, encapsula no padrão
-                sender_label = user_email or f"Suspeito {player_id}"
+                if user_nickname:
+                    sender_label = user_nickname
+                elif user_email:
+                    sender_label = user_email.split("@")[0]
+                else:
+                    sender_label = f"Suspeito {player_id}"
                 await broadcast(room_id, {
                     "type": "chat",
                     "player_id": sender_label,

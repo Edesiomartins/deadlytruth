@@ -41,7 +41,7 @@ export const AuthProvider = ({ children }) => {
         }
 
         const data = await response.json();
-        setUser({ email: data.email });
+        setUser({ email: data.email, nickname: data.nickname || null });
       } catch (e) {
         console.warn('Falha ao validar sessão:', e.message);
         logout();
@@ -87,7 +87,7 @@ export const AuthProvider = ({ children }) => {
       localStorage.setItem('jwt_token', data.access_token);
       setToken(data.access_token);
       setIsAuthenticated(true);
-      setUser({ email });
+      setUser({ email, nickname: null });
 
       // Valida e carrega dados do usuário via /auth/me
       const meResponse = await fetch(`${API_BASE_URL}/auth/me`, {
@@ -97,7 +97,7 @@ export const AuthProvider = ({ children }) => {
       });
       if (meResponse.ok) {
         const meData = await meResponse.json();
-        setUser({ email: meData.email });
+        setUser({ email: meData.email, nickname: meData.nickname || null });
       }
 
       navigate('/lobby');
@@ -109,7 +109,7 @@ export const AuthProvider = ({ children }) => {
         localStorage.setItem('jwt_token', `mock.${mockToken}.token`);
         setToken(`mock.${mockToken}.token`);
         setIsAuthenticated(true);
-        setUser({ email: email });
+        setUser({ email: email, nickname: null });
         navigate('/lobby');
       } else {
         setError(err.message || 'Erro desconhecido ao fazer login.');
@@ -124,7 +124,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Função de Registro
-  const register = async (email, password) => {
+  const register = async (email, password, nickname = null) => {
     setLoading(true);
     setError(null);
     try {
@@ -133,7 +133,7 @@ export const AuthProvider = ({ children }) => {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password, nickname }),
       });
 
       if (!response.ok) {
@@ -141,8 +141,12 @@ export const AuthProvider = ({ children }) => {
         throw new Error(errorData.detail || 'Falha no registro');
       }
 
+      const userData = await response.json();
+      
       // Se o registro for bem-sucedido, loga automaticamente
       await login(email, password);
+      // Atualiza o nickname no user state
+      setUser({ email: userData.email, nickname: userData.nickname || null });
       navigate('/lobby');
     } catch (err) {
       if (ALLOW_MOCK_AUTH) {
@@ -151,6 +155,36 @@ export const AuthProvider = ({ children }) => {
       } else {
         setError(err.message || 'Erro desconhecido ao registrar.');
       }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Função para atualizar nickname
+  const updateNickname = async (nickname) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/me/nickname`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ nickname }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: 'Falha ao atualizar nickname' }));
+        throw new Error(errorData.detail || 'Falha ao atualizar nickname');
+      }
+
+      const userData = await response.json();
+      setUser({ ...user, nickname: userData.nickname });
+      return userData;
+    } catch (err) {
+      setError(err.message || 'Erro desconhecido ao atualizar nickname.');
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -166,7 +200,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, token, user, loading, login, register, logout, error }}>
+    <AuthContext.Provider value={{ isAuthenticated, token, user, loading, login, register, logout, updateNickname, error }}>
       {children}
     </AuthContext.Provider>
   );

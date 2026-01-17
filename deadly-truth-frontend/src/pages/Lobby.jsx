@@ -3,11 +3,13 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 
 export default function Lobby() {
-  const { logout, user } = useAuth();
+  const { logout, user, updateNickname } = useAuth();
   const navigate = useNavigate();
+  const [showNicknameModal, setShowNicknameModal] = useState(false);
+  const [nicknameInput, setNicknameInput] = useState("");
   
   const [players, setPlayers] = useState([
-    { id: 1, name: user?.email?.split('@')[0] || "Você", status: "online", role: "Detective", isBot: false },
+    { id: 1, name: user?.nickname || user?.email?.split('@')[0] || "Você", status: "online", role: "Detective", isBot: false },
   ]);
   
   const [ws, setWs] = useState(null);
@@ -22,16 +24,47 @@ export default function Lobby() {
   
   const [newMessage, setNewMessage] = useState("");
 
+  // Verifica se o usuário tem nickname ao entrar no lobby
+  useEffect(() => {
+    if (user && !user.nickname) {
+      setShowNicknameModal(true);
+    }
+  }, [user]);
+
+  // Função para salvar nickname
+  const handleSaveNickname = async () => {
+    if (!nicknameInput.trim()) {
+      alert("Por favor, escolha um nickname");
+      return;
+    }
+
+    try {
+      await updateNickname(nicknameInput.trim());
+      setShowNicknameModal(false);
+      setNicknameInput("");
+      // Atualiza o nome do jogador na lista
+      setPlayers(prev => prev.map(p => 
+        p.id === 1 ? { ...p, name: nicknameInput.trim() } : p
+      ));
+    } catch (error) {
+      alert(error.message || "Erro ao salvar nickname");
+    }
+  };
+
   // Conecta ao WebSocket ao entrar no lobby
   useEffect(() => {
     const apiUrl = import.meta.env.VITE_API_URL || "https://deadlytruth-backend-production.up.railway.app";
-    const wsUrl = apiUrl.replace(/^http/, 'ws');
+    // Converte HTTP(S) para WS(S) corretamente
+    let wsUrl = apiUrl.replace(/^https/, 'wss').replace(/^http/, 'ws');
     const token = localStorage.getItem('jwt_token');
     
-    const websocket = new WebSocket(`${wsUrl}/ws/${roomId}?token=${token}`);
+    const wsEndpoint = `${wsUrl}/ws/${roomId}?token=${token}`;
+    console.log("🔌 Conectando ao WebSocket:", wsEndpoint);
+    
+    const websocket = new WebSocket(wsEndpoint);
     
     websocket.onopen = () => {
-      console.log("🔌 Conectado ao WebSocket");
+      console.log("✅ Conectado ao WebSocket com sucesso!");
       setConnected(true);
     };
     
@@ -42,26 +75,44 @@ export default function Lobby() {
         
         if (data.type === "game_start") {
           // Jogo começou! Navega para a tela do jogo
+          console.log("🎮 Jogo iniciado! Navegando para /game/", roomId);
           navigate(`/game/${roomId}`);
         }
+        
+        if (data.type === "error") {
+          console.error("❌ Erro do servidor:", data.msg);
+          alert(`Erro: ${data.msg || "Erro desconhecido"}`);
+        }
+        
+        if (data.type === "status") {
+          console.log("📊 Status:", data.msg);
+        }
       } catch (e) {
-        console.error("Erro ao processar mensagem:", e);
+        console.error("❌ Erro ao processar mensagem:", e, event.data);
       }
     };
     
     websocket.onerror = (error) => {
       console.error("❌ Erro no WebSocket:", error);
+      console.error("🔍 URL tentada:", wsEndpoint);
+      setConnected(false);
     };
     
-    websocket.onclose = () => {
-      console.log("🔌 Desconectado do WebSocket");
+    websocket.onclose = (event) => {
+      console.log("🔌 Desconectado do WebSocket", {
+        code: event.code,
+        reason: event.reason,
+        wasClean: event.wasClean
+      });
       setConnected(false);
     };
     
     setWs(websocket);
     
     return () => {
-      websocket.close();
+      if (websocket.readyState === WebSocket.OPEN) {
+        websocket.close();
+      }
     };
   }, [roomId, navigate]);
 
@@ -78,14 +129,41 @@ export default function Lobby() {
   };
 
   const handleStartGame = () => {
-    if (ws && connected && players.length >= 3) {
-      console.log("🎮 Enviando comando para iniciar jogo com", players.length, "jogadores");
-      ws.send(JSON.stringify({
-        type: "start",
-        players: players
-      }));
-    } else {
-      alert("Erro: WebSocket não conectado ou jogadores insuficientes");
+    console.log("🎮 handleStartGame chamado", {
+      ws: !!ws,
+      connected,
+      playersCount: players.length,
+      wsReadyState: ws?.readyState
+    });
+    
+    if (!ws) {
+      alert("❌ WebSocket não inicializado. Recarregue a página.");
+      return;
+    }
+    
+    if (ws.readyState !== WebSocket.OPEN) {
+      alert(`❌ WebSocket não conectado (estado: ${ws.readyState}). Aguarde a conexão ou recarregue a página.`);
+      return;
+    }
+    
+    if (players.length < 3) {
+      alert(`❌ Mínimo de 3 jogadores necessário. Atual: ${players.length}`);
+      return;
+    }
+    
+    const startMessage = {
+      type: "start",
+      players: players
+    };
+    
+    console.log("🎮 Enviando comando para iniciar jogo:", startMessage);
+    
+    try {
+      ws.send(JSON.stringify(startMessage));
+      console.log("✅ Mensagem 'start' enviada com sucesso!");
+    } catch (error) {
+      console.error("❌ Erro ao enviar mensagem:", error);
+      alert(`Erro ao iniciar partida: ${error.message}`);
     }
   };
 
@@ -349,6 +427,38 @@ export default function Lobby() {
           </div>
         </div>
       </div>
+
+      {/* Modal de Nickname */}
+      {showNicknameModal && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50">
+          <div className="bg-darkGray/95 border border-accentRed/30 rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl">
+            <h2 className="text-2xl font-bold text-white mb-4 font-cinzel text-center">
+              Escolha seu Nickname
+            </h2>
+            <p className="text-sm text-lightGray mb-6 text-center font-roboto">
+              Escolha um nickname para aparecer no jogo
+            </p>
+            <div className="space-y-4">
+              <input
+                type="text"
+                value={nicknameInput}
+                onChange={(e) => setNicknameInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSaveNickname()}
+                placeholder="Digite seu nickname"
+                maxLength={50}
+                className="w-full px-4 py-3 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto"
+                autoFocus
+              />
+              <button
+                onClick={handleSaveNickname}
+                className="w-full px-4 py-3 bg-gradient-to-r from-primaryRed to-lightRed hover:from-accentRed hover:to-lightRed text-white font-medium tracking-wide rounded-lg transition-all font-roboto"
+              >
+                Salvar Nickname
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

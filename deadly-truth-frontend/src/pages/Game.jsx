@@ -210,12 +210,55 @@ export default function Game() {
           
           {gameCase ? (
             <div className="p-4 space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-white mb-2 font-cinzel">Descrição</h3>
-                <p className="text-sm text-offWhite/80 font-roboto leading-relaxed">
-                  {gameCase.descricao}
-                </p>
-              </div>
+              {/* Garante que gameCase seja um objeto */}
+              {(() => {
+                if (typeof gameCase === 'string') {
+                  try {
+                    const parsed = JSON.parse(gameCase);
+                    gameCase = parsed;
+                    setGameCase(parsed); // Atualiza o estado
+                  } catch (e) {
+                    console.error("Erro ao parsear caso:", e);
+                  }
+                }
+                return null;
+              })()}
+              
+              {gameCase?.descricao && (
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-2 font-cinzel">Descrição</h3>
+                  <p className="text-sm text-offWhite/80 font-roboto leading-relaxed whitespace-pre-wrap">
+                    {String(gameCase.descricao)}
+                  </p>
+                </div>
+              )}
+              
+              {gameCase?.historia && (
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-2 font-cinzel">História</h3>
+                  <p className="text-sm text-offWhite/80 font-roboto leading-relaxed whitespace-pre-wrap">
+                    {String(gameCase.historia)}
+                  </p>
+                </div>
+              )}
+              
+              {gameCase?.local_corpo && (
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-2 font-cinzel">Local do Crime</h3>
+                  <p className="text-sm text-offWhite/80 font-roboto">
+                    🏛️ {String(gameCase.local_corpo)}
+                  </p>
+                </div>
+              )}
+              
+              {gameCase?.arma_crime && (
+                <div>
+                  <h3 className="text-sm font-bold text-white mb-2 font-cinzel">Arma do Crime</h3>
+                  <p className="text-sm text-offWhite/80 font-roboto">
+                    ⚔️ {String(gameCase.arma_crime)}
+                  </p>
+                </div>
+              )}
 
               {gameCase.suspeitos && gameCase.suspeitos.length > 0 && (
                 <div>
