@@ -17,6 +17,55 @@ from prompts import SYSTEM_GAME_MASTER, CREATE_CASE_TEMPLATE, INTERROGATION_TEMP
 from auth_routes import router as auth_router
 from auth_utils import decode_access_token
 from database import init_db
+from game_state import (
+    set_case_summary,
+    add_clue,
+    add_chat_message,
+    get_case_summary,
+    get_clues,
+    get_chat_history,
+    get_all_clues_list,
+    clear_room_state
+)
+
+# 👇 CLIENTE GROQ CONFIGURADO COM SUA CHAVE
+# Inicializa o cliente Groq apenas se a chave estiver disponível
+_groq_case_client = None
+
+def get_groq_case_client():
+    """Obtém ou cria o cliente Groq para geração de casos"""
+    global _groq_case_client
+    if _groq_case_client is None:
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY não encontrada no ambiente")
+        _groq_case_client = Groq(api_key=api_key)
+    return _groq_case_client
+
+def generate_case(prompt_template: str = None):
+    """
+    Gera um caso de assassinato usando IA via modelo LLaMA 3 70B (Groq).
+    Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
+    """
+    try:
+        # Usa o prompt fornecido ou o template padrão
+        user_prompt = prompt_template or CREATE_CASE_TEMPLATE
+        
+        # Obtém o cliente Groq
+        client = get_groq_case_client()
+        
+        response = client.chat.completions.create(
+            model="llama3-70b-8192",  # Modelo LLaMA 3 70B
+            messages=[
+                {"role": "system", "content": SYSTEM_GAME_MASTER},
+                {"role": "user", "content": user_prompt}
+            ]
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Erro ao gerar caso com Groq: {e}")
+        # Fallback para o método antigo se houver erro
+        return ai_generate(user_prompt or CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
 
 # Carrega variáveis de ambiente do arquivo .env
 # Usa o diretório do arquivo atual para encontrar .env
@@ -315,51 +364,86 @@ BOT_PERSONALITIES = {
 
 async def bot_generate_response(bot_name: str, context: dict, question: str = None) -> str:
     """
-    Gera resposta de um bot usando IA baseado em sua personalidade
+    Gera resposta de um bot usando DeepSeek para interação natural como jogador humano.
+    Os bots analisam pistas e interagem como se fossem jogadores reais.
     
     Args:
         bot_name: Nome do bot
-        context: Contexto do caso (descrição, evidências, chat history)
+        context: Contexto do caso (descrição, evidências, chat history, suspeitos, etc)
         question: Pergunta específica (se houver)
     """
     personality = BOT_PERSONALITIES.get(bot_name, BOT_PERSONALITIES["Silent_Reaper"])
     
-    # Monta o contexto do caso
+    # Monta o contexto completo do caso
     case_desc = context.get("case_description", "Mistério desconhecido")
+    case_history = context.get("case_history", "")
+    case_location = context.get("case_location", "")
+    case_weapon = context.get("case_weapon", "")
     chat_history = context.get("chat_history", [])
     evidences = context.get("evidences", [])
+    suspects = context.get("suspects", [])
     
-    # Histórico recente do chat (últimas 5 mensagens)
+    # Histórico recente do chat (últimas 8 mensagens para contexto melhor)
     recent_chat = "\n".join([
         f"{msg.get('player', 'Unknown')}: {msg.get('text', '')}"
-        for msg in chat_history[-5:]
+        for msg in chat_history[-8:]
     ]) if chat_history else "Nenhuma conversa ainda."
     
-    # Evidências disponíveis
+    # Evidências disponíveis formatadas
     evidence_list = "\n".join([
-        f"- {ev}" for ev in evidences
+        f"🔍 {ev}" for ev in evidences
     ]) if evidences else "Nenhuma evidência revelada ainda."
     
-    # Sistema: Definição da personalidade
-    system_prompt = f"""Você é {bot_name}, um personagem em um jogo de mistério.
+    # Suspeitos disponíveis
+    suspects_list = "\n".join([
+        f"• {sus}" for sus in suspects
+    ]) if suspects else "Suspeitos ainda não identificados."
+    
+    # Sistema: Definição da personalidade e comportamento como jogador
+    system_prompt = f"""Você é {bot_name}, um jogador humano em um jogo de mistério chamado "Deadly Truth".
 
 PERSONALIDADE: {personality['personality']}
 ESTILO DE FALA: {personality['style']}
 CARACTERÍSTICAS: {', '.join(personality['traits'])}
 
-REGRAS IMPORTANTES:
-1. Responda SEMPRE em português BR
-2. Mantenha sua personalidade única em cada resposta
-3. Seja BREVE - máximo 2-3 frases curtas
-4. Não quebre o personagem nunca
-5. Interaja naturalmente com outros jogadores
-6. Use as evidências e contexto para suas respostas
-7. Adicione suspense e mistério quando apropriado
+IMPORTANTE - COMPORTAMENTO COMO JOGADOR HUMANO:
+1. Você é um JOGADOR HUMANO, não um bot. Aja como tal.
+2. Analise as EVIDÊNCIAS disponíveis e faça conexões lógicas
+3. Use as pistas para formular teorias e suspeitas
+4. Faça perguntas inteligentes baseadas nas evidências
+5. Compartilhe suas análises e observações com outros jogadores
+6. Seja estratégico: use as informações para descobrir o culpado
+7. Responda SEMPRE em português BR
+8. Seja BREVE - máximo 2-3 frases curtas
+9. Mantenha sua personalidade única em cada resposta
+10. Interaja naturalmente - você quer GANHAR o jogo!
+
+VOCÊ PODE USAR NATURALMENTE:
+- Palavras como "suspeito", "assassino", "detetive", "culpado" nas suas mensagens
+- Referências a outros jogadores como suspeitos
+- Análises sobre quem pode ser o assassino
+- Discussões sobre estratégias de investigação
+- Essas palavras fazem parte do jogo e são naturais nas conversas
+
+COMO USAR AS PISTAS:
+- Analise cada evidência cuidadosamente
+- Faça conexões entre diferentes pistas
+- Formule hipóteses baseadas nas evidências
+- Questione inconsistências
+- Compartilhe suas descobertas com o grupo
+- Mencione suspeitos e teorias sobre o assassino naturalmente
 """
     
-    # Prompt: Contexto + Pergunta
+    # Prompt: Contexto completo + Pergunta
     if question:
-        user_prompt = f"""CASO: {case_desc}
+        user_prompt = f"""CONTEXTO DO CASO:
+📋 DESCRIÇÃO: {case_desc}
+📖 HISTÓRIA: {case_history}
+📍 LOCAL DO CORPO: {case_location}
+🔪 ARMA DO CRIME: {case_weapon}
+
+SUSPEITOS:
+{suspects_list}
 
 EVIDÊNCIAS REVELADAS:
 {evidence_list}
@@ -369,10 +453,17 @@ CONVERSA RECENTE:
 
 PERGUNTA/SITUAÇÃO: {question}
 
-Responda como {bot_name} de forma natural e breve (máx 2-3 frases):"""
+Como {bot_name}, analise as evidências e responda de forma natural como um jogador humano tentando resolver o mistério (máx 2-3 frases):"""
     else:
-        # Bot falando espontaneamente
-        user_prompt = f"""CASO: {case_desc}
+        # Bot falando espontaneamente - deve analisar pistas e interagir
+        user_prompt = f"""CONTEXTO DO CASO:
+📋 DESCRIÇÃO: {case_desc}
+📖 HISTÓRIA: {case_history}
+📍 LOCAL DO CORPO: {case_location}
+🔪 ARMA DO CRIME: {case_weapon}
+
+SUSPEITOS:
+{suspects_list}
 
 EVIDÊNCIAS REVELADAS:
 {evidence_list}
@@ -380,16 +471,30 @@ EVIDÊNCIAS REVELADAS:
 CONVERSA RECENTE:
 {recent_chat}
 
-É sua vez de falar. Faça uma observação, pergunta ou comentário relevante como {bot_name} (máx 2-3 frases):"""
+É sua vez de falar. Como {bot_name}, analise as evidências disponíveis e faça uma observação, pergunta ou análise relevante como um jogador humano tentando descobrir o culpado (máx 2-3 frases):"""
     
-    # Gera resposta usando IA
+    # Gera resposta usando DeepSeek (motor para interação de bots)
     try:
-        response = ai_generate(user_prompt, system=system_prompt)
+        deepseek_client = get_deepseek_client()
+        
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": user_prompt})
+        
+        response = deepseek_client.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            temperature=0.8,  # Um pouco mais criativo para respostas naturais
+            max_tokens=150  # Limita para respostas curtas
+        )
+        
+        bot_response = response.choices[0].message.content.strip()
         # Limpa a resposta (remove aspas extras, etc)
-        response = response.strip().strip('"\'')
-        return response
+        bot_response = bot_response.strip().strip('"\'')
+        return bot_response
     except Exception as e:
-        print(f"❌ Erro ao gerar resposta do bot {bot_name}: {e}")
+        print(f"❌ Erro ao gerar resposta do bot {bot_name} com DeepSeek: {e}")
         # Fallback: resposta genérica baseada na personalidade
         fallbacks = {
             "Shadow_Hunter": "Hmm... preciso investigar isso mais a fundo.",
@@ -427,7 +532,11 @@ async def process_bot_turn(room_id: str):
     current_player = players[current_turn]
     
     # Verifica se é um bot
-    if not current_player.get("is_bot", False):
+    if not current_player.get("is_bot", False) and not current_player.get("isBot", False):
+        return
+    
+    # Verifica se o bot está morto
+    if current_player.get("status") == "dead":
         return
     
     bot_name = current_player.get("name", "Bot")
@@ -437,34 +546,37 @@ async def process_bot_turn(room_id: str):
     import random
     await asyncio.sleep(random.uniform(2, 5))
     
-    # Prepara o contexto para o bot
+    # Prepara o contexto completo para o bot (com todas as informações do caso)
+    case_data = room.get("case", {})
     context = {
-        "case_description": room.get("case", {}).get("descricao", ""),
+        "case_description": case_data.get("descricao", ""),
+        "case_history": case_data.get("historia", ""),
+        "case_location": case_data.get("local_corpo", ""),
+        "case_weapon": case_data.get("arma_crime", ""),
         "chat_history": room.get("chat", []),
-        "evidences": room.get("case", {}).get("evidencias", [])
+        "evidences": case_data.get("evidencias", []),
+        "suspects": case_data.get("suspeitos", [])
     }
     
-    # Gera resposta do bot
+    # Gera resposta do bot usando DeepSeek (motor para interação de bots)
     bot_response = await bot_generate_response(bot_name, context)
     
-    # Adiciona a mensagem ao chat
+    # Adiciona a mensagem ao chat (sem indicar que é bot)
     message = {
         "player": bot_name,
         "text": bot_response,
-        "is_bot": True,
         "timestamp": datetime.now().isoformat()
     }
     room["chat"].append(message)
     
-    # Envia para todos os jogadores conectados
+    # Envia para todos os jogadores conectados (como mensagem normal de suspeito)
     if room_id in CONNECTIONS:
         for ws in CONNECTIONS[room_id]:
             try:
                 await ws.send_json({
-                    "type": "bot_message",
+                    "type": "player_message",  # Trata como mensagem normal
                     "player": bot_name,
-                    "message": bot_response,
-                    "is_bot": True
+                    "message": bot_response
                 })
             except:
                 pass
@@ -483,7 +595,6 @@ async def process_bot_turn(room_id: str):
                 await ws.send_json({
                     "type": "turn_change",
                     "current_player": next_player.get("name"),
-                    "is_bot": next_player.get("is_bot", False),
                     "turn_index": room["current_turn"]
                 })
             except:
@@ -649,7 +760,18 @@ async def create_case(req: CreateCaseRequest):
     room_id = str(uuid.uuid4())[:8]
     
     prompt = CREATE_CASE_TEMPLATE.format(nivel=req.nivel, cenario=req.cenario)
-    case_json = groq_generate(prompt, system=SYSTEM_GAME_MASTER)
+    # Usa a nova função generate_case
+    case_json = generate_case(prompt)
+    
+    # Salva o resumo do caso no game_state (alinhado com a dinâmica: todos são suspeitos, um é assassino)
+    set_case_summary(room_id, case_json)
+    
+    # Extrai pistas básicas do texto do caso (linhas que contêm "pista:")
+    for line in case_json.splitlines():
+        if "pista:" in line.lower() or "pista" in line.lower():
+            pista_extraida = line.strip()
+            if pista_extraida:
+                add_clue(room_id, pista_extraida)
     
     # Usar a função melhorada para extrair JSON com validação Pydantic
     case = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
@@ -661,6 +783,15 @@ async def create_case(req: CreateCaseRequest):
         case["nivel"] = req.nivel
     if not case.get("cenario"):
         case["cenario"] = req.cenario
+    
+    # Atualiza o game_state com o resumo formatado do caso
+    case_summary = f"{case.get('descricao', '')} {case.get('historia', '')}"
+    set_case_summary(room_id, case_summary)
+    
+    # Adiciona evidências do caso ao game_state
+    evidencias = case.get("evidencias", [])
+    for evidencia in evidencias:
+        add_clue(room_id, evidencia)
     
     # Inicializar estrutura de jogo
     ROOMS[room_id] = {
@@ -703,7 +834,22 @@ async def ask_interrogation(room_id: str, req: InterrogationRequest):
         nivel=room.get("nivel", "Iniciante")
     )
     
-    answer = groq_generate(prompt, system=SYSTEM_GAME_MASTER)
+    # Usa Groq para gerar resposta do interrogatório (mestre do jogo)
+    # Isso inclui pistas sugeridas que serão reveladas aos jogadores
+    try:
+        groq_client = get_groq_case_client()
+        response = groq_client.chat.completions.create(
+            model="llama3-70b-8192",  # Modelo LLaMA 3 70B
+            messages=[
+                {"role": "system", "content": SYSTEM_GAME_MASTER},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        answer = response.choices[0].message.content
+    except Exception as e:
+        print(f"❌ Erro ao gerar resposta do interrogatório com Groq: {e}")
+        # Fallback para método antigo
+        answer = ai_generate(prompt, system=SYSTEM_GAME_MASTER)
     
     # Estrutura a resposta corretamente
     structured_answer = parse_interrogation_response(answer)
@@ -718,6 +864,11 @@ async def ask_interrogation(room_id: str, req: InterrogationRequest):
         "pistas_sugeridas": structured_answer.get("pistas_sugeridas", [])
     }
     room["chat"].append(entry)
+    
+    # Adiciona pistas sugeridas ao game_state
+    pistas_sugeridas = structured_answer.get("pistas_sugeridas", [])
+    for pista in pistas_sugeridas:
+        add_clue(room_id, pista)
     
     # Broadcast via WebSocket para a sala
     for ws in CONNECTIONS.get(room_id, []):
@@ -744,6 +895,211 @@ async def broadcast(room_id: str, message: dict):
             print(f"Failed to send to WebSocket: {e}")
 
 
+async def send_private_message(room_id: str, player_id: str, message: dict):
+    """Envia mensagem privada para um jogador específico"""
+    # Encontra o WebSocket do jogador pelo player_id ou nome
+    if room_id in CONNECTIONS:
+        for ws in CONNECTIONS[room_id]:
+            # Nota: Precisamos mapear player_id para websocket
+            # Por enquanto, enviaremos para todos e o frontend filtra
+            try:
+                await ws.send_text(json.dumps(message))
+            except:
+                pass
+
+
+def generate_clue_from_murder(victim_name: str, victim_info: dict, case_context: dict) -> str:
+    """
+    Gera uma pista após um assassinato usando Groq.
+    Analisa a morte e gera uma pista contextual.
+    """
+    try:
+        groq_client = get_groq_case_client()
+        
+        prompt = f"""Você é o Mestre do Jogo 'Deadly Truth'. Um assassinato acabou de ocorrer.
+
+VÍTIMA: {victim_name}
+CONTEXTO DO CASO: {case_context.get('descricao', '')} {case_context.get('historia', '')}
+LOCAL DO CRIME: {case_context.get('local_corpo', '')}
+ARMA DO CRIME: {case_context.get('arma_crime', '')}
+
+Gere UMA pista forense ou investigativa que foi encontrada no corpo ou na cena do crime.
+A pista deve ser útil para os investigadores, mas não deve revelar diretamente o assassino.
+Seja criativo e misterioso.
+
+Formato: "Pista encontrada: [descrição da pista]"
+
+Exemplo: "Pista encontrada: Fragmentos de tecido vermelho foram encontrados perto do corpo, sugerindo uma luta."
+
+Responda APENAS com a pista, sem explicações adicionais:"""
+        
+        response = groq_client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=[
+                {"role": "system", "content": SYSTEM_GAME_MASTER},
+                {"role": "user", "content": prompt}
+            ]
+        )
+        
+        clue = response.choices[0].message.content.strip()
+        # Limpa a resposta
+        clue = clue.replace("Pista encontrada:", "").strip()
+        if not clue.startswith("Pista encontrada:"):
+            clue = f"Pista encontrada: {clue}"
+        
+        return clue
+    except Exception as e:
+        print(f"❌ Erro ao gerar pista do assassinato: {e}")
+        return f"Pista encontrada: Vestígios de luta foram encontrados na cena do crime."
+
+
+async def check_win_conditions(room_id: str) -> dict:
+    """
+    Verifica condições de vitória do jogo.
+    Retorna: {"game_ended": bool, "winner": str, "reason": str}
+    """
+    room = ROOMS.get(room_id)
+    if not room:
+        return {"game_ended": False}
+    
+    players = room.get("players", [])
+    alive_players = [p for p in players if isinstance(p, dict) and p.get("status") != "dead"]
+    dead_players = [p for p in players if isinstance(p, dict) and p.get("status") == "dead"]
+    
+    killer = next((p for p in players if isinstance(p, dict) and p.get("is_killer")), None)
+    
+    # Assassino vence se eliminar todos os outros
+    if killer and len(alive_players) == 1 and alive_players[0].get("is_killer"):
+        return {
+            "game_ended": True,
+            "winner": "assassino",
+            "winner_name": killer.get("name", "Assassino"),
+            "reason": "O assassino eliminou todos os outros jogadores!"
+        }
+    
+    # Assassino vence se sobreviver até o final (quando restam apenas 2 jogadores)
+    if killer and len(alive_players) == 2:
+        killer_alive = any(p.get("is_killer") for p in alive_players)
+        if killer_alive:
+            return {
+                "game_ended": True,
+                "winner": "assassino",
+                "winner_name": killer.get("name", "Assassino"),
+                "reason": "O assassino sobreviveu até o final!"
+            }
+    
+    # Inocentes vencem se descobrirem o assassino (implementar votação depois)
+    # Por enquanto, retorna False
+    
+    return {"game_ended": False}
+
+
+async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
+    """
+    Assassina um jogador. Valida se quem chamou é o assassino e se é seu turno.
+    
+    Returns: {"success": bool, "message": str, "clue": str}
+    """
+    room = ROOMS.get(room_id)
+    if not room:
+        return {"success": False, "message": "Sala não encontrada"}
+    
+    players = room.get("players", [])
+    
+    # Encontra o assassino e o alvo
+    killer = None
+    target = None
+    
+    for p in players:
+        if isinstance(p, dict):
+            if p.get("id") == killer_id or p.get("name") == killer_id:
+                killer = p
+            if p.get("id") == target_id or p.get("name") == target_id:
+                target = p
+    
+    # Validações
+    if not killer:
+        return {"success": False, "message": "Assassino não encontrado"}
+    
+    if not killer.get("is_killer"):
+        return {"success": False, "message": "Apenas o assassino pode matar"}
+    
+    if not target:
+        return {"success": False, "message": "Alvo não encontrado"}
+    
+    if target.get("status") == "dead":
+        return {"success": False, "message": "O alvo já está morto"}
+    
+    if target.get("is_killer"):
+        return {"success": False, "message": "O assassino não pode se matar"}
+    
+    # Verifica se é o turno do assassino
+    current_turn = room.get("current_turn", 0)
+    current_player = players[current_turn] if current_turn < len(players) else None
+    
+    if not current_player or (isinstance(current_player, dict) and 
+                              (current_player.get("id") != killer_id and current_player.get("name") != killer_id)):
+        return {"success": False, "message": "Você só pode matar durante seu turno"}
+    
+    # Verifica limite de mortes por rodada (1 morte por rodada)
+    kills_this_round = room.get("kills_this_round", 0)
+    if kills_this_round >= 1:
+        return {"success": False, "message": "Limite de 1 morte por rodada atingido"}
+    
+    # Mata o jogador
+    target["status"] = "dead"
+    room["kills_this_round"] = kills_this_round + 1
+    
+    # Gera pista após a morte
+    case_data = room.get("case", {})
+    clue = generate_clue_from_murder(
+        target.get("name", "Jogador"),
+        target,
+        case_data
+    )
+    
+    # Adiciona pista ao game_state
+    add_clue(room_id, clue)
+    
+    # Anuncia a morte publicamente
+    death_message = f"💀 {target.get('name', 'Jogador')} foi encontrado morto!"
+    
+    await broadcast(room_id, {
+        "type": "player_death",
+        "victim": target.get("name", "Jogador"),
+        "message": death_message,
+        "clue": clue
+    })
+    
+    # Adiciona mensagem ao chat
+    room.setdefault("chat", []).append({
+        "player": "Sistema",
+        "text": death_message,
+        "timestamp": datetime.now().isoformat()
+    })
+    
+    add_chat_message(room_id, "Sistema", death_message)
+    add_chat_message(room_id, "Sistema", clue)
+    
+    # Verifica condições de vitória
+    win_check = await check_win_conditions(room_id)
+    if win_check.get("game_ended"):
+        await broadcast(room_id, {
+            "type": "game_end",
+            "winner": win_check.get("winner"),
+            "winner_name": win_check.get("winner_name"),
+            "reason": win_check.get("reason")
+        })
+        room["game_active"] = False
+    
+    return {
+        "success": True,
+        "message": death_message,
+        "clue": clue,
+        "victim": target.get("name", "Jogador")
+    }
+
+
 async def game_loop(room_id: str):
     room = ROOMS.get(room_id)
     if not room: return
@@ -751,6 +1107,38 @@ async def game_loop(room_id: str):
     participantes = room.get("players", [])
     num_jogadores = len(participantes)
     room["game_active"] = True
+    
+    # 🎯 PASSO 1: Randomizar o assassino
+    import random
+    if participantes:
+        # Garante que todos os jogadores tenham estrutura correta
+        for i, p in enumerate(participantes):
+            if isinstance(p, dict):
+                if "status" not in p:
+                    p["status"] = "alive"
+                if "is_killer" not in p:
+                    p["is_killer"] = False
+        
+        # Escolhe um assassino aleatório
+        killer_index = random.randint(0, len(participantes) - 1)
+        killer = participantes[killer_index]
+        
+        if isinstance(killer, dict):
+            killer["is_killer"] = True
+            killer["status"] = "alive"
+            
+            # Envia mensagem privada para o assassino
+            killer_name = killer.get("name", f"Jogador {killer_index + 1}")
+            await send_private_message(room_id, killer_name, {
+                "type": "you_are_killer",
+                "message": f"🔪 Você é o ASSASSINO! Seu objetivo é eliminar todos os outros jogadores sem ser descoberto. Você pode matar 1 jogador por rodada durante seu turno.",
+                "secret": True
+            })
+            
+            print(f"🔪 Assassino escolhido: {killer_name}")
+    
+    # Inicializa contador de mortes da rodada
+    room["kills_this_round"] = 0
     
     await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
     
@@ -775,7 +1163,19 @@ async def game_loop(room_id: str):
         num_jogadores=num_jogadores
     )
     
-    case_json = ai_generate(prompt_dinamico, system=SYSTEM_GAME_MASTER)
+    # Usa a nova função generate_case com o prompt dinâmico
+    case_json = generate_case(prompt_dinamico)
+    
+    # Salva o resumo do caso no game_state (alinhado com a dinâmica: todos são suspeitos, um é assassino)
+    set_case_summary(room_id, case_json)
+    
+    # Extrai pistas básicas do texto do caso (linhas que contêm "pista:")
+    for line in case_json.splitlines():
+        if "pista:" in line.lower() or "pista" in line.lower():
+            pista_extraida = line.strip()
+            if pista_extraida:
+                add_clue(room_id, pista_extraida)
+    
     case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
     
     # Garante que o case_id seja único
@@ -786,6 +1186,15 @@ async def game_loop(room_id: str):
     
     # SALVAR NA SALA (Importante para quem entrar depois)
     room["case"] = case_data 
+    
+    # Atualiza o game_state com o resumo formatado do caso
+    case_summary = f"{case_data.get('descricao', '')} {case_data.get('historia', '')}"
+    set_case_summary(room_id, case_summary)
+    
+    # Adiciona evidências iniciais ao game_state
+    evidencias = case_data.get("evidencias", [])
+    for evidencia in evidencias:
+        add_clue(room_id, evidencia)
 
     # Enviar para todos com o campo 'content' e 'case' padronizados
     await broadcast(room_id, {
@@ -797,21 +1206,51 @@ async def game_loop(room_id: str):
     })
 
     # 2. Inicia a sequência de turnos
+    round_number = 0
     while room.get("game_active", False):
+        round_number += 1
+        room["kills_this_round"] = 0  # Reset contador de mortes por rodada
+        
+        # Filtra apenas jogadores vivos
+        alive_players = [p for p in participantes if isinstance(p, dict) and p.get("status") != "dead"]
+        
+        if not alive_players:
+            break
+        
         for idx, player_data in enumerate(participantes):
+            # Pula jogadores mortos
+            if isinstance(player_data, dict) and player_data.get("status") == "dead":
+                continue
+            
             room["current_turn"] = idx
             
             # Verifica se é um bot
             is_bot = player_data.get("isBot", False) if isinstance(player_data, dict) else False
             player_name = player_data.get("name", f"Jogador {idx+1}") if isinstance(player_data, dict) else str(player_data)
+            is_killer = player_data.get("is_killer", False) if isinstance(player_data, dict) else False
+            player_id = player_data.get("id", idx) if isinstance(player_data, dict) else idx
             
+            # Não revela se é bot ou humano - todos são suspeitos
+            # Envia is_killer apenas para o próprio jogador (frontend filtra)
             await broadcast(room_id, {
                 "type": "turn_start",
                 "player": player_name,
-                "is_bot": is_bot,
+                "player_id": player_id,
                 "turn_index": idx,
-                "time_limit": 120
+                "time_limit": 120,
+                "is_killer": is_killer  # Frontend filtra e mostra apenas para o próprio jogador
             })
+            
+            # Se for bot assassino, pode decidir matar
+            if is_bot and is_killer:
+                # Bot assassino decide se mata (30% de chance se houver alvos)
+                alive_targets = [p for p in participantes if isinstance(p, dict) and 
+                                p.get("status") != "dead" and not p.get("is_killer")]
+                if alive_targets and random.random() < 0.3:
+                    target = random.choice(alive_targets)
+                    result = await kill_player(room_id, player_name, target.get("name"))
+                    if result.get("success"):
+                        await asyncio.sleep(2)  # Pausa dramática
             
             # Se for bot, processa automaticamente
             if is_bot:
@@ -832,6 +1271,17 @@ async def game_loop(room_id: str):
                         "player": player_name,
                         "turn_index": idx
                     })
+        
+        # Verifica condições de vitória após cada rodada
+        win_check = await check_win_conditions(room_id)
+        if win_check.get("game_ended"):
+            await broadcast(room_id, {
+                "type": "game_end",
+                "winner": win_check.get("winner"),
+                "winner_name": win_check.get("winner_name"),
+                "reason": win_check.get("reason")
+            })
+            break
 
     room["game_active"] = False
 
@@ -954,8 +1404,48 @@ async def ws_room(websocket: WebSocket, room_id: str):
                             "msg": f"Mínimo de 3 jogadores necessário. Atual: {num_atual}"
                         }))
                 
+                elif msg_type == "kill_player":
+                    # Ação de assassinar um jogador
+                    target_id = data.get("target_id") or data.get("target")
+                    
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = f"Jogador {player_id}"
+                    
+                    result = await kill_player(room_id, player_identifier, target_id)
+                    
+                    if result.get("success"):
+                        await websocket.send_text(json.dumps({
+                            "type": "kill_success",
+                            "message": result.get("message"),
+                            "clue": result.get("clue")
+                        }))
+                    else:
+                        await websocket.send_text(json.dumps({
+                            "type": "kill_error",
+                            "message": result.get("message", "Erro ao executar assassinato")
+                        }))
+                
                 elif msg_type == "message" or msg_type == "action":
                     # Processa mensagem de chat ou ação do jogador
+                    
+                    # Verifica se o jogador está morto
+                    room = ROOMS.get(room_id)
+                    if room:
+                        players = room.get("players", [])
+                        current_player = next((p for p in players if isinstance(p, dict) and 
+                                              (p.get("name") == sender_label or p.get("id") == player_id)), None)
+                        if current_player and current_player.get("status") == "dead":
+                            await websocket.send_text(json.dumps({
+                                "type": "error",
+                                "msg": "Você está morto e não pode mais interagir!"
+                            }))
+                            continue
+                    
                     if room_id in GAME_EVENTS:
                         GAME_EVENTS[room_id]["player_action_event"].set()
                     
@@ -969,22 +1459,86 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         sender_label = f"Jogador {player_id}"
                     message_text = data.get("text") or data.get("content", "Realizou uma ação")
                     
-                    # Adiciona ao histórico do chat da sala
+                    # Adiciona ao histórico do chat da sala (sem indicar se é bot ou humano)
                     if room_id in ROOMS:
                         ROOMS[room_id].setdefault("chat", []).append({
                             "player": sender_label,
                             "text": message_text,
-                            "is_bot": False,
                             "timestamp": datetime.now().isoformat()
                         })
                     
-                    # Broadcast para todos os jogadores
+                    # Atualiza o game_state com a mensagem
+                    add_chat_message(room_id, sender_label, message_text)
+                    
+                    # Broadcast para todos os jogadores (sem indicar se é bot ou humano)
                     await broadcast(room_id, {
                         "type": "player_message",
                         "player": sender_label,
-                        "message": message_text,
-                        "is_bot": False
+                        "message": message_text
                     })
+                    
+                    # 🔸 Bot entra em ação após cada mensagem recebida (se houver bots na sala)
+                    if room_id in ROOMS:
+                        room = ROOMS[room_id]
+                        players = room.get("players", [])
+                        # Verifica se há bots na sala
+                        bots_in_room = [p for p in players if isinstance(p, dict) and (p.get("isBot") or p.get("is_bot"))]
+                        
+                        if bots_in_room and room.get("game_active", False):
+                            # Seleciona um bot aleatório para responder (30% de chance)
+                            import random
+                            if random.random() < 0.3:  # 30% de chance de um bot responder
+                                responding_bot = random.choice(bots_in_room)
+                                bot_name = responding_bot.get("name", "Bot")
+                                
+                                # Obtém contexto do caso e pistas
+                                case_data = room.get("case", {})
+                                case_summary = get_case_summary(room_id)
+                                if not case_summary:
+                                    # Cria resumo do caso se não existir
+                                    case_summary = f"{case_data.get('descricao', '')} {case_data.get('historia', '')}"
+                                    set_case_summary(room_id, case_summary)
+                                
+                                clues = get_clues(room_id)
+                                chat_history = get_chat_history(room_id)
+                                
+                                # Prepara contexto completo para o bot
+                                context = {
+                                    "case_description": case_data.get("descricao", ""),
+                                    "case_history": case_data.get("historia", ""),
+                                    "case_location": case_data.get("local_corpo", ""),
+                                    "case_weapon": case_data.get("arma_crime", ""),
+                                    "chat_history": room.get("chat", []),
+                                    "evidences": case_data.get("evidencias", []),
+                                    "suspects": case_data.get("suspeitos", [])
+                                }
+                                
+                                # Aguarda um tempo aleatório antes de responder (1-3 segundos)
+                                await asyncio.sleep(random.uniform(1, 3))
+                                
+                                # Gera resposta do bot usando DeepSeek
+                                try:
+                                    bot_reply = await bot_generate_response(bot_name, context, question=f"Jogador {sender_label} disse: {message_text}")
+                                    
+                                    # Adiciona ao histórico do chat (sem indicar que é bot)
+                                    if room_id in ROOMS:
+                                        ROOMS[room_id].setdefault("chat", []).append({
+                                            "player": bot_name,
+                                            "text": bot_reply,
+                                            "timestamp": datetime.now().isoformat()
+                                        })
+                                    
+                                    # Atualiza game_state
+                                    add_chat_message(room_id, bot_name, bot_reply)
+                                    
+                                    # Envia resposta do bot como mensagem normal (todos são suspeitos)
+                                    await broadcast(room_id, {
+                                        "type": "player_message",  # Trata como mensagem normal
+                                        "player": bot_name,
+                                        "message": bot_reply
+                                    })
+                                except Exception as e:
+                                    print(f"❌ Erro ao gerar resposta do bot {bot_name}: {e}")
             except Exception as e:
                 # Se for texto puro, encapsula no padrão
                 if user_nickname:

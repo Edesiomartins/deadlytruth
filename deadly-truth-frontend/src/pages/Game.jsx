@@ -53,36 +53,27 @@ export default function Game() {
         if (data.type === "turn_start") {
           setCurrentTurn(data.turn_index || 0);
           const playerName = data.player;
-          const isBot = data.is_bot;
-          if (isBot) {
-            addSystemMessage(`🤖 Vez de ${playerName} (Bot)...`);
-          } else {
-            addSystemMessage(`👤 Vez de ${playerName}`);
-          }
+          // Todos são suspeitos - não revela se é bot ou humano
+          addSystemMessage(`🔍 Vez de ${playerName}`);
         }
         
-        if (data.type === "bot_message") {
-          addMessage(data.player, data.message, true);
-        }
-        
-        if (data.type === "player_message") {
-          addMessage(data.player, data.message, false);
+        if (data.type === "bot_message" || data.type === "player_message") {
+          // Trata todas as mensagens igualmente - todos são suspeitos
+          const playerName = data.player || data.player_id || "Suspeito";
+          const messageText = data.message || data.content || "";
+          addMessage(playerName, messageText);
         }
         
         if (data.type === "chat") {
           // Formato alternativo de mensagens
-          addMessage(data.player_id || "Jogador", data.content || "", false);
+          addMessage(data.player_id || "Suspeito", data.content || "");
         }
         
         if (data.type === "turn_change") {
           setCurrentTurn(data.turn_index || 0);
           const playerName = data.current_player;
-          const isBot = data.is_bot;
-          if (isBot) {
-            addSystemMessage(`🤖 Vez de ${playerName} (Bot)...`);
-          } else {
-            addSystemMessage(`👤 Vez de ${playerName}`);
-          }
+          // Todos são suspeitos - não revela se é bot ou humano
+          addSystemMessage(`🔍 Vez de ${playerName}`);
         }
         
         if (data.type === "hello") {
@@ -114,12 +105,12 @@ export default function Game() {
     };
   }, [roomId]);
 
-  const addMessage = (player, text, isBot) => {
+  const addMessage = (player, text) => {
+    // Todos são suspeitos - não armazena informação de bot ou função
     setMessages(prev => [...prev, {
       id: Date.now(),
       player,
       text,
-      isBot,
       time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     }]);
   };
@@ -314,11 +305,6 @@ export default function Game() {
                     <div className="flex items-baseline gap-2 mb-1">
                       <span className="text-xs font-medium text-accentRed font-roboto">
                         {msg.player}
-                        {msg.isBot && (
-                          <span className="ml-2 text-xs px-2 py-0.5 bg-agedGold/20 border border-agedGold/40 rounded text-agedGold">
-                            BOT
-                          </span>
-                        )}
                       </span>
                       <span className="text-xs text-mediumGray font-roboto">{msg.time}</span>
                     </div>

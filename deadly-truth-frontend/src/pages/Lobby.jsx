@@ -17,9 +17,7 @@ export default function Lobby() {
   const [roomId] = useState("sala-geral"); // ID da sala
   
   const [messages, setMessages] = useState([
-    { id: 1, user: "Shadow_Hunter", text: "Alguém pronto para começar?", time: "18:45" },
-    { id: 2, user: "Night_Stalker", text: "Estou pronto. Vai ser intenso...", time: "18:46" },
-    { id: 3, user: "Sistema", text: "Aguardando mais jogadores...", time: "18:47", system: true }
+    { id: 1, user: "Sistema", text: "Bem-vindo ao lobby! Aguardando jogadores...", time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), system: true }
   ]);
   
   const [newMessage, setNewMessage] = useState("");
@@ -201,6 +199,23 @@ export default function Lobby() {
     };
 
     setPlayers([...players, newBot]);
+    
+    // Adiciona mensagem do bot no chat quando ele é adicionado
+    const botGreetings = [
+      "Entrei na sala. Vamos resolver esse mistério!",
+      "Estou pronto para investigar.",
+      "Vamos descobrir a verdade.",
+      "Interessante... vamos ver o que aconteceu.",
+      "Estou aqui para ajudar na investigação."
+    ];
+    const randomGreeting = botGreetings[Math.floor(Math.random() * botGreetings.length)];
+    
+    setMessages(prev => [...prev, {
+      id: prev.length + 1,
+      user: randomName,
+      text: randomGreeting,
+      time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+    }]);
   };
 
   const fillWithBots = () => {
@@ -210,6 +225,17 @@ export default function Lobby() {
     
     const botsNeeded = Math.min(10 - players.length, availableBots.length);
     const newBots = [];
+    const botGreetings = [
+      "Entrei na sala. Vamos resolver esse mistério!",
+      "Estou pronto para investigar.",
+      "Vamos descobrir a verdade.",
+      "Interessante... vamos ver o que aconteceu.",
+      "Estou aqui para ajudar na investigação.",
+      "Vamos começar a investigação.",
+      "Pronto para o desafio.",
+      "Vamos desvendar esse caso."
+    ];
+    const newMessages = [];
 
     for (let i = 0; i < botsNeeded; i++) {
       const randomName = availableBots[i];
@@ -222,9 +248,19 @@ export default function Lobby() {
         role: randomRole,
         isBot: true
       });
+      
+      // Adiciona mensagem de cada bot no chat
+      const randomGreeting = botGreetings[Math.floor(Math.random() * botGreetings.length)];
+      newMessages.push({
+        id: messages.length + i + 1,
+        user: randomName,
+        text: randomGreeting,
+        time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+      });
     }
 
     setPlayers([...players, ...newBots]);
+    setMessages([...messages, ...newMessages]);
   };
 
   return (
