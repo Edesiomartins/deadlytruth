@@ -33,7 +33,13 @@ from game_state import (
     register_player,
     is_alive,
     kill_player_state,
-    get_player_status
+    get_player_status,
+    start_vote,
+    submit_vote,
+    get_vote_result,
+    get_accused_player,
+    all_votes_in,
+    clear_vote
 )
 
 # 👇 CLIENTE GROQ CONFIGURADO COM SUA CHAVE
@@ -59,21 +65,54 @@ def generate_case(prompt_template: str = None):
         # Usa o prompt fornecido ou o template padrão
         user_prompt = prompt_template or CREATE_CASE_TEMPLATE
         
+        # Verifica se a API key está disponível
+        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            raise ValueError("GROQ_API_KEY não encontrada no ambiente")
+        
         # Obtém o cliente Groq
         client = get_groq_case_client()
+        
+        print(f"🔄 Gerando caso com Groq (modelo: llama3-70b-8192)...")
         
         response = client.chat.completions.create(
             model="llama3-70b-8192",  # Modelo LLaMA 3 70B
             messages=[
                 {"role": "system", "content": SYSTEM_GAME_MASTER},
                 {"role": "user", "content": user_prompt}
-            ]
+            ],
+            temperature=0.8,
+            max_tokens=2000,
+            timeout=60.0  # Timeout de 60 segundos
         )
-        return response.choices[0].message.content
+        
+        result = response.choices[0].message.content
+        print(f"✅ Caso gerado com sucesso (tamanho: {len(result)} caracteres)")
+        return result
+        
     except Exception as e:
         print(f"❌ Erro ao gerar caso com Groq: {e}")
+        print(f"   Tipo do erro: {type(e).__name__}")
+        import traceback
+        traceback.print_exc()
+        
         # Fallback para o método antigo se houver erro
-        return ai_generate(user_prompt or CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
+        try:
+            fallback_result = ai_generate(user_prompt or CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
+            print(f"✅ Usando fallback, resultado gerado (tamanho: {len(fallback_result)} caracteres)")
+            return fallback_result
+        except Exception as e2:
+            print(f"❌ Erro no fallback também: {e2}")
+            # Retorna um caso básico de emergência
+            return json.dumps({
+                "case_id": "FALLBACK",
+                "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
+                "historia": "A investigação está em andamento. Reúna pistas e descubra a verdade.",
+                "local_corpo": "Local desconhecido",
+                "arma_crime": "Desconhecida",
+                "suspeitos": [],
+                "evidencias": []
+            })
 
 # Carrega variáveis de ambiente do arquivo .env
 # Usa o diretório do arquivo atual para encontrar .env
@@ -291,17 +330,17 @@ def ai_generate(prompt: str, system: str = None) -> str:
         else:
             # Usa Groq (padrão)
             print(f"🤖 Usando Groq (Llama 3.3 70B)...")
-            client = get_groq_client()
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=1,
-                max_completion_tokens=1024,
-                top_p=1,
-                stream=False,
-                stop=None
-            )
-            return completion.choices[0].message.content or ""
+        client = get_groq_client()
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=messages,
+            temperature=1,
+            max_completion_tokens=1024,
+            top_p=1,
+            stream=False,
+            stop=None
+        )
+        return completion.choices[0].message.content or ""
     except ValueError as e:
         return f"Erro de configuração ({provider}): {str(e)}"
     except Exception as e:
@@ -577,6 +616,10 @@ async def process_bot_turn(room_id: str):
     }
     room["chat"].append(message)
     
+    # Verifica se o bot está morto
+    bot_status = get_player_status(room_id, bot_name)
+    is_bot_dead = bot_status == "dead"
+    
     # Envia para todos os jogadores conectados (como mensagem normal de suspeito)
     if room_id in CONNECTIONS:
         for ws in CONNECTIONS[room_id]:
@@ -584,7 +627,8 @@ async def process_bot_turn(room_id: str):
                 await ws.send_json({
                     "type": "player_message",  # Trata como mensagem normal
                     "player": bot_name,
-                    "message": bot_response
+                    "message": bot_response,
+                    "dead": is_bot_dead
                 })
             except:
                 pass
@@ -629,11 +673,43 @@ def extract_json_from_string(text, validate_with_pydantic=None):
         # Validar com Pydantic se fornecido
         if validate_with_pydantic:
             try:
+                # Se parsed não for dict, tenta converter
+                if not isinstance(parsed, dict):
+                    print(f"⚠️ parsed não é dict, tipo: {type(parsed)}")
+                    if isinstance(parsed, str):
+                        parsed = json.loads(parsed)
+                    else:
+                        parsed = {"descricao": str(parsed)[:500]}
+                
                 validated = validate_with_pydantic(**parsed)
-                return validated.model_dump()
+                result = validated.model_dump()
+                # Garante que o resultado seja um dict
+                if not isinstance(result, dict):
+                    print(f"⚠️ Resultado da validação não é dict, tipo: {type(result)}")
+                    return parsed
+                return result
             except Exception as e:
                 print(f"⚠️ Validação Pydantic falhou: {e}, usando dados brutos")
+                # Garante que parsed seja um dict
+                if not isinstance(parsed, dict):
+                    if isinstance(parsed, str):
+                        try:
+                            parsed = json.loads(parsed)
+                        except:
+                            parsed = {"descricao": parsed[:500]}
+                    else:
+                        parsed = {"descricao": str(parsed)[:500]}
                 return parsed
+        
+        # Garante que o resultado seja sempre um dict
+        if not isinstance(parsed, dict):
+            if isinstance(parsed, str):
+                try:
+                    parsed = json.loads(parsed)
+                except:
+                    parsed = {"descricao": parsed[:500]}
+            else:
+                parsed = {"descricao": str(parsed)[:500]}
         
         return parsed
     except (json.JSONDecodeError, ValueError) as e:
@@ -1203,7 +1279,28 @@ async def game_loop(room_id: str):
     )
     
     # Usa a nova função generate_case com o prompt dinâmico
-    case_json = generate_case(prompt_dinamico)
+    print(f"🔄 Iniciando geração de caso...")
+    try:
+        case_json = generate_case(prompt_dinamico)
+        if not case_json:
+            raise ValueError("generate_case retornou None ou vazio")
+        print(f"✅ Resposta da IA recebida (tamanho: {len(case_json)} caracteres)")
+        print(f"   Primeiros 200 chars: {case_json[:200]}...")
+    except Exception as e:
+        print(f"❌ Erro ao chamar generate_case: {e}")
+        import traceback
+        traceback.print_exc()
+        # Usa um caso de fallback
+        case_json = json.dumps({
+            "case_id": case_id_unique,
+            "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
+            "historia": "A investigação está em andamento. Reúna pistas e descubra a verdade.",
+            "local_corpo": cenario_escolhido,
+            "arma_crime": "Desconhecida",
+            "suspeitos": [],
+            "evidencias": []
+        })
+        print(f"✅ Usando caso de fallback")
     
     # Salva o resumo do caso no game_state (alinhado com a dinâmica: todos são suspeitos, um é assassino)
     set_case_summary(room_id, case_json)
@@ -1215,13 +1312,56 @@ async def game_loop(room_id: str):
             if pista_extraida:
                 add_clue(room_id, pista_extraida)
     
-    case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
-    
-    # Garante que o case_id seja único
-    if not case_data.get("case_id") or case_data.get("case_id") == "ERRO":
-        case_data["case_id"] = case_id_unique
-    case_data["nivel"] = nivel_escolhido
-    case_data["cenario"] = cenario_escolhido
+    try:
+        case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+        
+        # Garante que case_data seja um dict
+        if not isinstance(case_data, dict):
+            print(f"⚠️ case_data não é dict, convertendo... Tipo: {type(case_data)}")
+            if isinstance(case_data, str):
+                try:
+                    case_data = json.loads(case_data)
+                except:
+                    case_data = {"descricao": case_data[:500]}
+        
+        # Garante que o case_id seja único
+        if not case_data.get("case_id") or case_data.get("case_id") == "ERRO":
+            case_data["case_id"] = case_id_unique
+        case_data["nivel"] = nivel_escolhido
+        case_data["cenario"] = cenario_escolhido
+        
+        # Garante que todos os campos necessários existam
+        if "descricao" not in case_data:
+            case_data["descricao"] = case_data.get("descricao", "Um mistério foi revelado...")
+        if "historia" not in case_data:
+            case_data["historia"] = case_data.get("historia", "")
+        if "local_corpo" not in case_data:
+            case_data["local_corpo"] = case_data.get("local_corpo", "")
+        if "arma_crime" not in case_data:
+            case_data["arma_crime"] = case_data.get("arma_crime", "")
+        if "suspeitos" not in case_data:
+            case_data["suspeitos"] = case_data.get("suspeitos", [])
+        if "evidencias" not in case_data:
+            case_data["evidencias"] = case_data.get("evidencias", [])
+            
+        print(f"✅ Caso gerado com sucesso: {case_data.get('case_id')}")
+        print(f"   Descrição: {case_data.get('descricao', '')[:100]}...")
+        
+    except Exception as e:
+        print(f"❌ Erro ao processar caso: {e}")
+        print(f"   case_json (primeiros 500 chars): {case_json[:500]}")
+        # Cria um caso de fallback
+        case_data = {
+            "case_id": case_id_unique,
+            "nivel": nivel_escolhido,
+            "cenario": cenario_escolhido,
+            "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
+            "historia": case_json[:1000] if len(case_json) > 0 else "História do caso em análise...",
+            "local_corpo": cenario_escolhido,
+            "arma_crime": "Desconhecida",
+            "suspeitos": [],
+            "evidencias": []
+        }
     
     # SALVAR NA SALA (Importante para quem entrar depois)
     room["case"] = case_data 
@@ -1235,18 +1375,66 @@ async def game_loop(room_id: str):
     for evidencia in evidencias:
         add_clue(room_id, evidencia)
 
+    # Validação final: garante que case_data seja um dict válido antes de enviar
+    if not isinstance(case_data, dict):
+        print(f"⚠️ case_data não é dict antes de enviar, tipo: {type(case_data)}")
+        if isinstance(case_data, str):
+            try:
+                case_data = json.loads(case_data)
+                print(f"✅ case_data convertido de string para dict")
+            except Exception as e:
+                print(f"⚠️ Erro ao converter: {e}")
+                case_data = {"descricao": case_data[:500]}
+        else:
+            case_data = {
+                "case_id": case_id_unique,
+                "descricao": str(case_data)[:500] if case_data else "Um mistério foi revelado...",
+                "historia": "",
+                "local_corpo": cenario_escolhido,
+                "arma_crime": "",
+                "suspeitos": [],
+                "evidencias": []
+            }
+    
+    print(f"📤 Enviando caso para jogadores (case_id: {case_data.get('case_id')})")
+    print(f"   Tipo: {type(case_data)}, Keys: {list(case_data.keys())[:5] if isinstance(case_data, dict) else 'N/A'}...")
+
     # Enviar para todos com o campo 'content' e 'case' padronizados
     await broadcast(room_id, {
         "type": "game_start",
         "payload": {
             "msg": "O mistério começou!",
-            "case": case_data  # O React vai ler isso aqui
+            "case": case_data  # O React vai ler isso aqui - deve ser um objeto, não string
         }
     })
 
-    # 2. Inicia a sequência de turnos
+    # 2. Inicia a sequência de turnos com controle de tempo
+    import time
+    game_start_time = time.time()
+    game_min_duration = 30 * 60  # 30 minutos em segundos
+    game_max_duration = 120 * 60  # 120 minutos em segundos
+    turn_timeout = 60  # 1 minuto por turno
+    
+    room["game_start_time"] = game_start_time
+    room["game_min_duration"] = game_min_duration
+    room["game_max_duration"] = game_max_duration
+    
     round_number = 0
     while room.get("game_active", False):
+        # Verifica tempo total do jogo
+        elapsed_time = time.time() - game_start_time
+        
+        # Se passou do tempo máximo, força fim do jogo
+        if elapsed_time >= game_max_duration:
+            await broadcast(room_id, {
+                "type": "game_end",
+                "winner": "tempo_esgotado",
+                "winner_name": "Tempo máximo atingido",
+                "reason": "O jogo atingiu o tempo máximo de 120 minutos."
+            })
+            room["game_active"] = False
+            break
+        
         round_number += 1
         room["kills_this_round"] = 0  # Reset contador de mortes por rodada
         
@@ -1255,6 +1443,9 @@ async def game_loop(room_id: str):
         
         if not alive_players:
             break
+        
+        # Verifica se já passou o tempo mínimo antes de permitir fim do jogo
+        can_end_game = elapsed_time >= game_min_duration
         
         for idx, player_data in enumerate(participantes):
             # Pula jogadores mortos
@@ -1275,13 +1466,20 @@ async def game_loop(room_id: str):
             
             # Não revela se é bot ou humano - todos são suspeitos
             # Envia is_killer apenas para o próprio jogador (frontend filtra)
+            # Calcula tempo restante do jogo
+            elapsed_time = time.time() - game_start_time
+            game_time_remaining = max(0, game_max_duration - elapsed_time)
+            
             await broadcast(room_id, {
                 "type": "turn_start",
                 "player": player_name,
                 "player_id": player_id,
                 "player_identifier": player_identifier,  # ID usado no game_state
                 "turn_index": idx,
-                "time_limit": 120,
+                "time_limit": turn_timeout,  # 1 minuto por turno
+                "game_time_remaining": int(game_time_remaining),  # Tempo restante do jogo em segundos
+                "game_elapsed_time": int(elapsed_time),  # Tempo decorrido em segundos
+                "can_end_game": can_end_game,  # Se já passou o tempo mínimo
                 "is_killer": is_killer  # Frontend filtra e mostra apenas para o próprio jogador
             })
             
@@ -1301,31 +1499,69 @@ async def game_loop(room_id: str):
                 await process_bot_turn(room_id)
                 continue
             
-            # Se for jogador humano, aguarda ação
+            # Se for jogador humano, aguarda ação (1 minuto de timeout)
             if room_id in GAME_EVENTS:
                 GAME_EVENTS[room_id]["player_action_event"].clear()
+                turn_start_time = time.time()
+                
+                # Envia atualizações de tempo a cada 10 segundos
+                async def send_time_updates():
+                    while time.time() - turn_start_time < turn_timeout:
+                        await asyncio.sleep(10)
+                        if not room.get("game_active", False):
+                            break
+                        elapsed_turn = time.time() - turn_start_time
+                        remaining_turn = max(0, turn_timeout - elapsed_turn)
+                        elapsed_game = time.time() - game_start_time
+                        remaining_game = max(0, game_max_duration - elapsed_game)
+                        
+                        await broadcast(room_id, {
+                            "type": "time_update",
+                            "turn_time_remaining": int(remaining_turn),
+                            "game_time_remaining": int(remaining_game),
+                            "game_elapsed_time": int(elapsed_game),
+                            "can_end_game": elapsed_game >= game_min_duration
+                        })
+                
+                # Inicia task de atualização de tempo
+                time_update_task = asyncio.create_task(send_time_updates())
+                
                 try:
                     await asyncio.wait_for(
                         GAME_EVENTS[room_id]["player_action_event"].wait(),
-                        timeout=120.0
+                        timeout=turn_timeout  # 1 minuto
                     )
+                    time_update_task.cancel()  # Cancela atualizações se o jogador agiu
                 except asyncio.TimeoutError:
+                    time_update_task.cancel()
                     await broadcast(room_id, {
                         "type": "time_out", 
                         "player": player_name,
-                        "turn_index": idx
+                        "turn_index": idx,
+                        "message": f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente."
                     })
+                    add_chat_message(room_id, "Sistema", f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente.")
         
-        # Verifica condições de vitória após cada rodada
-        win_check = await check_win_conditions(room_id)
-        if win_check.get("game_ended"):
-            await broadcast(room_id, {
-                "type": "game_end",
-                "winner": win_check.get("winner"),
-                "winner_name": win_check.get("winner_name"),
-                "reason": win_check.get("reason")
-            })
-            break
+        # Verifica condições de vitória após cada rodada (só se já passou o tempo mínimo)
+        elapsed_time = time.time() - game_start_time
+        if elapsed_time >= game_min_duration:
+            win_check = await check_win_conditions(room_id)
+            if win_check.get("game_ended"):
+                await broadcast(room_id, {
+                    "type": "game_end",
+                    "winner": win_check.get("winner"),
+                    "winner_name": win_check.get("winner_name"),
+                    "reason": win_check.get("reason")
+                })
+                break
+        else:
+            # Ainda não pode terminar, informa tempo restante mínimo
+            remaining_min = int((game_min_duration - elapsed_time) / 60)
+            if round_number == 1 or round_number % 5 == 0:  # A cada 5 rodadas ou na primeira
+                await broadcast(room_id, {
+                    "type": "status",
+                    "msg": f"⏳ O jogo precisa durar pelo menos 30 minutos. Tempo mínimo restante: {remaining_min} minutos."
+                })
 
     room["game_active"] = False
 
@@ -1376,13 +1612,42 @@ async def ws_room(websocket: WebSocket, room_id: str):
     
     # Adiciona jogador à lista (limite de 12 jogadores)
     room = ROOMS[room_id]
-    player_id = len(room.get("players", [])) + 1
-    if player_id not in room.get("players", []) and player_id <= 12:
-        room["players"].append(player_id)
+    
+    # Identifica o jogador
+    player_identifier = user_nickname or (user_email.split("@")[0] if user_email else f"Jogador {len(room.get('players', [])) + 1}")
+    
+    # Verifica se o jogador já está na lista
+    existing_player = None
+    for p in room.get("players", []):
+        if isinstance(p, dict):
+            if p.get("name") == player_identifier or p.get("id") == player_identifier:
+                existing_player = p
+                break
+    
+    # Se não existe, adiciona à lista
+    if not existing_player:
+        player_data = {
+            "id": player_identifier,
+            "name": player_identifier,
+            "status": "online",
+            "isBot": False,
+            "is_bot": False,
+            "email": user_email
+        }
+        if "players" not in room:
+            room["players"] = []
+        room["players"].append(player_data)
+        print(f"✅ Jogador {player_identifier} adicionado à sala {room_id}")
     
     # Registra o jogador no game_state
-    player_identifier = user_nickname or (user_email.split("@")[0] if user_email else f"Jogador {player_id}")
     register_player(room_id, player_identifier)
+    
+    # Notifica todos os jogadores sobre a atualização da lista
+    await broadcast(room_id, {
+        "type": "players_update",
+        "players": room.get("players", []),
+        "new_player": player_identifier
+    })
     
     # Inicializa eventos de jogo se necessário
     if room_id not in GAME_EVENTS:
@@ -1409,24 +1674,32 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 "msg": "Você chegou tarde à cena do crime, mas a investigação continua!",
                 "case": room["case"],
                 "total_players": len(room.get("players", [])),
-                "player_id": player_id,
+                "player_id": player_identifier,
                 "game_active": True
             }
         }))
     
-    # Envia estado inicial
+    # Envia estado inicial com lista de jogadores
     await websocket.send_text(json.dumps({
         "type": "hello",
         "payload": {
             "room_id": room_id,
-            "player_id": player_id,
+            "player_id": player_identifier,
             "players": len(CONNECTIONS[room_id]),
             "total_players": len(room.get("players", [])),
             "case": room.get("case"),
             "current_turn": room.get("current_turn", 0),
             "game_active": room.get("game_active", False)
-        }
+        },
+        "players_list": room.get("players", [])  # Envia lista completa de jogadores
     }))
+    
+    # Envia atualização de jogadores para sincronizar
+    await broadcast(room_id, {
+        "type": "players_update",
+        "players": room.get("players", []),
+        "new_player": player_identifier
+    })
     
     try:
         while True:
@@ -1462,7 +1735,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     elif user_email:
                         player_identifier = user_email.split("@")[0]
                     else:
-                        player_identifier = f"Jogador {player_id}"
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                     
                     # Verifica se é o turno do jogador antes de processar
                     current_turn_id = get_current_turn(room_id)
@@ -1487,6 +1760,169 @@ async def ws_room(websocket: WebSocket, room_id: str):
                             "message": result.get("message", "Erro ao executar assassinato")
                         }))
                 
+                elif msg_type == "acusar" or (msg_type == "action" and data.get("action") == "acusar"):
+                    # Ação de acusar um suspeito
+                    accused_id = data.get("target") or data.get("target_id") or data.get("accused")
+                    
+                    if not accused_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você precisa especificar quem está acusando."
+                        }))
+                        continue
+                    
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
+                    
+                    # Verifica se é o turno do jogador
+                    current_turn_id = get_current_turn(room_id)
+                    if current_turn_id and player_identifier != current_turn_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Não é sua vez. Aguarde o próximo turno."
+                        }))
+                        continue
+                    
+                    # Verifica se o acusado está vivo
+                    if get_player_status(room_id, accused_id) != "alive":
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você só pode acusar jogadores vivos."
+                        }))
+                        continue
+                    
+                    # Verifica se o jogador não está se acusando
+                    if player_identifier == accused_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você não pode se acusar."
+                        }))
+                        continue
+                    
+                    # Inicia a votação
+                    start_vote(room_id, accused_id)
+                    
+                    # Avisa a todos que começou a votação
+                    await broadcast(room_id, {
+                        "type": "votacao_iniciada",
+                        "message": f"⚖️ {player_identifier} acusou {accused_id} de ser o assassino!",
+                        "accused": accused_id,
+                        "accuser": player_identifier
+                    })
+                    
+                    # Adiciona ao chat
+                    add_chat_message(room_id, "Sistema", f"⚖️ {player_identifier} acusou {accused_id} de ser o assassino!")
+                
+                elif msg_type == "voto" or msg_type == "vote":
+                    # Voto em uma acusação
+                    accused = get_accused_player(room_id)
+                    if not accused:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Nenhuma votação em andamento."
+                        }))
+                        continue
+                    
+                    vote = data.get("value") or data.get("vote")
+                    if vote not in ["culpado", "inocente"]:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⚠️ Voto inválido. Use 'culpado' ou 'inocente'."
+                        }))
+                        continue
+                    
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
+                    
+                    # Verifica se o jogador está vivo
+                    if not is_alive(room_id, player_identifier):
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Jogadores mortos não votam."
+                        }))
+                        continue
+                    
+                    # Registra o voto
+                    submit_vote(room_id, player_identifier, vote)
+                    
+                    # Confirma o voto
+                    await websocket.send_text(json.dumps({
+                        "type": "vote_registered",
+                        "message": f"✅ Seu voto ({vote}) foi registrado!"
+                    }))
+                    
+                    # Verifica se todos os vivos já votaram
+                    room = ROOMS.get(room_id)
+                    if room:
+                        players = room.get("players", [])
+                        alive_players = [p for p in players if isinstance(p, dict) and p.get("status") != "dead"]
+                        alive_identifiers = []
+                        for p in alive_players:
+                            if isinstance(p, dict):
+                                pid = p.get("id") or p.get("name")
+                                if pid:
+                                    alive_identifiers.append(pid)
+                        
+                        if all_votes_in(room_id, alive_identifiers):
+                            # Todos votaram, processa resultado
+                            culpa, inoc = get_vote_result(room_id)
+                            killer_id = get_killer_id(room_id)
+                            
+                            resultado_msg = f"🗳️ Votação encerrada: {culpa} votaram 'culpado', {inoc} votaram 'inocente'."
+                            
+                            # Se maioria votou 'culpado'
+                            if culpa > inoc:
+                                if accused == killer_id:
+                                    resultado_msg += f"\n🎉 O assassino era {accused}! Os inocentes venceram!"
+                                    # Inocentes venceram
+                                    await broadcast(room_id, {
+                                        "type": "game_end",
+                                        "winner": "inocentes",
+                                        "winner_name": "Inocentes",
+                                        "reason": f"Descobriram que {accused} era o assassino!",
+                                        "accused": accused,
+                                        "was_killer": True
+                                    })
+                                    room["game_active"] = False
+                                    clear_room_state(room_id)
+                                else:
+                                    resultado_msg += f"\n❌ {accused} era inocente. O jogo continua..."
+                                    await broadcast(room_id, {
+                                        "type": "resultado_votacao",
+                                        "message": resultado_msg,
+                                        "accused": accused,
+                                        "was_killer": False,
+                                        "guilt_votes": culpa,
+                                        "innocent_votes": inoc
+                                    })
+                                    # Limpa a votação para permitir nova acusação
+                                    clear_vote(room_id)
+                            else:
+                                resultado_msg += "\n🔄 A maioria votou 'inocente'. O jogo continua..."
+                                await broadcast(room_id, {
+                                    "type": "resultado_votacao",
+                                    "message": resultado_msg,
+                                    "accused": accused,
+                                    "was_killer": False,
+                                    "guilt_votes": culpa,
+                                    "innocent_votes": inoc
+                                })
+                                # Limpa a votação para permitir nova acusação
+                                clear_vote(room_id)
+                            
+                            # Adiciona resultado ao chat
+                            add_chat_message(room_id, "Sistema", resultado_msg)
+                
                 elif msg_type == "message" or msg_type == "action":
                     # Processa mensagem de chat ou ação do jogador
                     
@@ -1498,8 +1934,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         sender_label = user_email.split("@")[0]
                         player_identifier = user_email.split("@")[0]
                     else:
-                        sender_label = f"Jogador {player_id}"
-                        player_identifier = f"Jogador {player_id}"
+                        sender_label = player_identifier or f"Jogador {len(room.get('players', []))}"
+                        if not player_identifier:
+                            player_identifier = sender_label
                     
                     # ⛔ Verifica se é o turno do jogador
                     current_turn_id = get_current_turn(room_id)
@@ -1533,11 +1970,15 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     # Atualiza o game_state com a mensagem
                     add_chat_message(room_id, sender_label, message_text)
                     
+                    # Verifica se o jogador está morto
+                    is_dead = get_player_status(room_id, player_identifier) == "dead"
+                    
                     # Broadcast para todos os jogadores (sem indicar se é bot ou humano)
                     await broadcast(room_id, {
                         "type": "player_message",
                         "player": sender_label,
-                        "message": message_text
+                        "message": message_text,
+                        "dead": is_dead
                     })
                     
                     # 🔸 Bot entra em ação após cada mensagem recebida (se houver bots na sala)
@@ -1594,11 +2035,16 @@ async def ws_room(websocket: WebSocket, room_id: str):
                                     # Atualiza game_state
                                     add_chat_message(room_id, bot_name, bot_reply)
                                     
+                                    # Verifica se o bot está morto
+                                    bot_status = get_player_status(room_id, bot_name)
+                                    is_bot_dead = bot_status == "dead"
+                                    
                                     # Envia resposta do bot como mensagem normal (todos são suspeitos)
                                     await broadcast(room_id, {
                                         "type": "player_message",  # Trata como mensagem normal
                                         "player": bot_name,
-                                        "message": bot_reply
+                                        "message": bot_reply,
+                                        "dead": is_bot_dead
                                     })
                                 except Exception as e:
                                     print(f"❌ Erro ao gerar resposta do bot {bot_name}: {e}")
@@ -1609,17 +2055,30 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 elif user_email:
                     sender_label = user_email.split("@")[0]
                 else:
-                    sender_label = f"Suspeito {player_id}"
+                    sender_label = player_identifier or f"Suspeito {len(room.get('players', []))}"
+                    if not player_identifier:
+                        player_identifier = sender_label
                 await broadcast(room_id, {
                     "type": "chat",
                     "player_id": sender_label,
                     "content": msg
                 })
     except WebSocketDisconnect:
-        CONNECTIONS[room_id].remove(websocket)
+        if websocket in CONNECTIONS.get(room_id, []):
+            CONNECTIONS[room_id].remove(websocket)
+        
         # Remove jogador da lista
-        if player_id in room.get("players", []):
-            room["players"].remove(player_id)
+        room = ROOMS.get(room_id)
+        if room:
+            room["players"] = [p for p in room.get("players", []) 
+                             if not (isinstance(p, dict) and (p.get("name") == player_identifier or p.get("email") == user_email))]
+            
+            # Notifica todos sobre a remoção
+            await broadcast(room_id, {
+                "type": "players_update",
+                "players": room.get("players", []),
+                "removed_player": player_identifier
+            })
         if not CONNECTIONS[room_id]:  # Remove sala vazia
             del CONNECTIONS[room_id]
             if room_id in GAME_EVENTS:

@@ -85,6 +85,58 @@ export default function Lobby() {
         if (data.type === "status") {
           console.log("📊 Status:", data.msg);
         }
+        
+        if (data.type === "players_update") {
+          // Atualiza a lista de jogadores com a lista do servidor
+          if (data.players && Array.isArray(data.players)) {
+            const updatedPlayers = data.players.map((p, idx) => ({
+              id: idx + 1,
+              name: p.name || p.id || `Jogador ${idx + 1}`,
+              status: p.status || "online",
+              role: p.role || "Suspeito",
+              isBot: p.isBot || p.is_bot || false
+            }));
+            setPlayers(updatedPlayers);
+            
+            // Adiciona mensagem quando um novo jogador entra
+            if (data.new_player) {
+              const newPlayerName = data.new_player;
+              setMessages(prev => [...prev, {
+                id: prev.length + 1,
+                user: "Sistema",
+                text: `👤 ${newPlayerName} entrou no lobby`,
+                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                system: true
+              }]);
+            }
+            
+            // Adiciona mensagem quando um jogador sai
+            if (data.removed_player) {
+              const removedPlayerName = data.removed_player;
+              setMessages(prev => [...prev, {
+                id: prev.length + 1,
+                user: "Sistema",
+                text: `👋 ${removedPlayerName} saiu do lobby`,
+                time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
+                system: true
+              }]);
+            }
+          }
+        }
+        
+        if (data.type === "hello" && data.players_list) {
+          // Sincroniza lista de jogadores ao conectar
+          if (data.players_list && Array.isArray(data.players_list)) {
+            const syncedPlayers = data.players_list.map((p, idx) => ({
+              id: idx + 1,
+              name: p.name || p.id || `Jogador ${idx + 1}`,
+              status: p.status || "online",
+              role: p.role || "Suspeito",
+              isBot: p.isBot || p.is_bot || false
+            }));
+            setPlayers(syncedPlayers);
+          }
+        }
       } catch (e) {
         console.error("❌ Erro ao processar mensagem:", e, event.data);
       }

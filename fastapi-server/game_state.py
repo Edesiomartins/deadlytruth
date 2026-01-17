@@ -144,3 +144,67 @@ def get_player_status(room_id: str, player_id: str) -> str:
         return "unknown"
     players = game_states[room_id].get("players", {})
     return players.get(player_id, {}).get("status", "unknown")
+
+
+# ======== Sistema de Votação ========
+
+def start_vote(room_id: str, accused_id: str):
+    """Inicia uma votação para acusar um jogador"""
+    if room_id not in game_states:
+        game_states[room_id] = {
+            "case_summary": "", 
+            "clues": [], 
+            "chat_history": [], 
+            "current_turn": None, 
+            "killer_id": None, 
+            "players": {}, 
+            "accused_player": None, 
+            "votes": {}
+        }
+    if "accused_player" not in game_states[room_id]:
+        game_states[room_id]["accused_player"] = None
+    if "votes" not in game_states[room_id]:
+        game_states[room_id]["votes"] = {}
+    game_states[room_id]["accused_player"] = accused_id
+    game_states[room_id]["votes"] = {}  # Reset votos
+
+
+def submit_vote(room_id: str, voter_id: str, vote: str):
+    """Registra o voto de um jogador"""
+    if room_id not in game_states:
+        return
+    if "votes" not in game_states[room_id]:
+        game_states[room_id]["votes"] = {}
+    game_states[room_id]["votes"][voter_id] = vote.lower()
+
+
+def all_votes_in(room_id: str, voters_alive: list[str]) -> bool:
+    """Verifica se todos os jogadores vivos já votaram"""
+    if room_id not in game_states:
+        return False
+    votes = game_states[room_id].get("votes", {})
+    return all(voter in votes for voter in voters_alive)
+
+
+def get_vote_result(room_id: str) -> tuple:
+    """Retorna o resultado da votação (culpado_votes, inocente_votes)"""
+    if room_id not in game_states:
+        return (0, 0)
+    votes = game_states[room_id].get("votes", {})
+    guilt_votes = sum(1 for v in votes.values() if v == "culpado")
+    innocent_votes = sum(1 for v in votes.values() if v == "inocente")
+    return (guilt_votes, innocent_votes)
+
+
+def get_accused_player(room_id: str) -> str:
+    """Retorna o ID do jogador acusado"""
+    if room_id not in game_states:
+        return None
+    return game_states[room_id].get("accused_player")
+
+
+def clear_vote(room_id: str):
+    """Limpa a votação atual"""
+    if room_id in game_states:
+        game_states[room_id]["accused_player"] = None
+        game_states[room_id]["votes"] = {}
