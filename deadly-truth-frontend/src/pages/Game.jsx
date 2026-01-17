@@ -12,6 +12,8 @@ export default function Game() {
   const [gameCase, setGameCase] = useState(null);
   const [players, setPlayers] = useState([]);
   const [currentTurn, setCurrentTurn] = useState(0);
+  const [currentPlayerName, setCurrentPlayerName] = useState(null); // Nome do jogador da vez
+  const [isMyTurn, setIsMyTurn] = useState(false); // Se é a vez do jogador atual
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
@@ -47,12 +49,26 @@ export default function Game() {
         
         if (data.type === "game_start") {
           setGameCase(data.payload.case);
-          addSystemMessage("🎭 O mistério começou! Investigue com cuidado...");
+          // Mensagem do mestre anunciando o caso
+          if (data.payload.case) {
+            const caseDesc = data.payload.case.descricao || "Um novo mistério foi revelado...";
+            addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+            addSystemMessage(`📋 ${caseDesc}`);
+          } else {
+            addSystemMessage("🎭 O mistério começou! Investigue com cuidado...");
+          }
         }
         
         if (data.type === "turn_start") {
           setCurrentTurn(data.turn_index || 0);
           const playerName = data.player;
+          const playerIdentifier = data.player_identifier || playerName;
+          setCurrentPlayerName(playerName);
+          
+          // Verifica se é a vez do jogador atual (compara com identifier também)
+          const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          setIsMyTurn(playerName === myName || playerIdentifier === myName);
+          
           // Todos são suspeitos - não revela se é bot ou humano
           addSystemMessage(`🔍 Vez de ${playerName}`);
         }
@@ -72,6 +88,12 @@ export default function Game() {
         if (data.type === "turn_change") {
           setCurrentTurn(data.turn_index || 0);
           const playerName = data.current_player;
+          setCurrentPlayerName(playerName);
+          
+          // Verifica se é a vez do jogador atual
+          const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          setIsMyTurn(playerName === myName);
+          
           // Todos são suspeitos - não revela se é bot ou humano
           addSystemMessage(`🔍 Vez de ${playerName}`);
         }
@@ -82,6 +104,30 @@ export default function Game() {
         
         if (data.type === "error") {
           addSystemMessage(`❌ Erro: ${data.msg || "Ocorreu um erro"}`);
+        }
+        
+        if (data.type === "player_death") {
+          addSystemMessage(`💀 ${data.message || `${data.victim} foi encontrado morto!`}`);
+          if (data.clue) {
+            addSystemMessage(`🔍 ${data.clue}`);
+          }
+        }
+        
+        if (data.type === "game_end") {
+          addSystemMessage(`🏆 FIM DO JOGO! ${data.reason || ""}`);
+          addSystemMessage(`🎯 Vencedor: ${data.winner_name || data.winner}`);
+        }
+        
+        if (data.type === "you_are_killer") {
+          // Mensagem privada apenas para o assassino
+          const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          if (data.player_name === myName || data.player_id) {
+            addSystemMessage(`🔪 ${data.message || "Você é o ASSASSINO!"}`);
+          }
+        }
+        
+        if (data.type === "status") {
+          addSystemMessage(`ℹ️ ${data.msg || ""}`);
         }
         
       } catch (e) {
@@ -125,6 +171,12 @@ export default function Game() {
   };
 
   const sendMessage = () => {
+    // Só permite enviar mensagem se for a vez do jogador
+    if (!isMyTurn) {
+      addSystemMessage("⏳ Aguarde sua vez para enviar mensagens!");
+      return;
+    }
+    
     if (newMessage.trim() && ws && connected) {
       const messageText = newMessage.trim();
       ws.send(JSON.stringify({
@@ -170,13 +222,26 @@ export default function Game() {
       <div className="relative z-10 border-b border-accentRed/30 backdrop-blur-xl bg-darkGray/60">
         <div className="px-6 py-4">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex-1">
               <h1 className="text-xl font-bold text-white tracking-wide font-cinzel">
                 {gameCase?.case_id || "DEADLY TRUTH"}
               </h1>
-              <p className="text-xs text-accentRed/70 tracking-wider font-roboto">
-                {connected ? "🔴 Ao vivo" : "⚫ Desconectado"}
-              </p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className="text-xs text-accentRed/70 tracking-wider font-roboto">
+                  {connected ? "🔴 Ao vivo" : "⚫ Desconectado"}
+                </p>
+                {currentPlayerName && (
+                  <>
+                    <span className="text-xs text-mediumGray">•</span>
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 rounded-full bg-accentRed animate-pulse"></div>
+                      <p className="text-xs text-accentRed font-medium font-roboto">
+                        Vez de: <span className="text-white">{currentPlayerName}</span>
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
             
             <button 
@@ -318,20 +383,28 @@ export default function Game() {
           
           {/* Input */}
           <div className="p-4 border-t border-accentRed/30">
+            {!isMyTurn && currentPlayerName && (
+              <div className="mb-2 px-3 py-2 bg-accentRed/20 border border-accentRed/30 rounded-lg">
+                <p className="text-xs text-accentRed/80 font-roboto text-center">
+                  ⏳ Aguarde sua vez. É a vez de <span className="font-bold text-accentRed">{currentPlayerName}</span>
+                </p>
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 type="text"
                 value={newMessage}
                 onChange={(e) => setNewMessage(e.target.value)}
                 onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Digite sua mensagem..."
-                className="flex-1 px-3 py-2 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto"
-                disabled={!connected}
+                placeholder={isMyTurn ? "Digite sua mensagem..." : "Aguarde sua vez..."}
+                className="flex-1 px-3 py-2 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={!connected || !isMyTurn}
               />
               <button
                 onClick={sendMessage}
-                disabled={!connected}
+                disabled={!connected || !isMyTurn}
                 className="px-4 py-2 bg-primaryRed hover:bg-accentRed rounded-lg text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                title={!isMyTurn ? "Aguarde sua vez" : "Enviar mensagem"}
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />

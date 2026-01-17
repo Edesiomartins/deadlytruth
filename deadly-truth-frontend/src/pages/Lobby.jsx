@@ -333,7 +333,6 @@ export default function Lobby() {
                         </span>
                       )}
                     </div>
-                    <p className="text-xs text-accentRed/70 font-roboto">{player.role}</p>
                   </div>
                   
                   <svg className="w-5 h-5 text-accentRed/30 group-hover:text-accentRed/60 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24">

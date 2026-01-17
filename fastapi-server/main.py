@@ -25,7 +25,15 @@ from game_state import (
     get_clues,
     get_chat_history,
     get_all_clues_list,
-    clear_room_state
+    clear_room_state,
+    set_current_turn,
+    get_current_turn,
+    set_killer_id,
+    get_killer_id,
+    register_player,
+    is_alive,
+    kill_player_state,
+    get_player_status
 )
 
 # 👇 CLIENTE GROQ CONFIGURADO COM SUA CHAVE
@@ -997,6 +1005,7 @@ async def check_win_conditions(room_id: str) -> dict:
 async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     """
     Assassina um jogador. Valida se quem chamou é o assassino e se é seu turno.
+    Usa game_state para controle centralizado.
     
     Returns: {"success": bool, "message": str, "clue": str}
     """
@@ -1004,50 +1013,60 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     if not room:
         return {"success": False, "message": "Sala não encontrada"}
     
+    # 🔒 Verifica se é o assassino usando game_state
+    killer_id_from_state = get_killer_id(room_id)
+    if killer_id_from_state and killer_id != killer_id_from_state:
+        # Tenta encontrar pelo nome também
+        players = room.get("players", [])
+        killer_found = False
+        for p in players:
+            if isinstance(p, dict) and p.get("is_killer") and (p.get("name") == killer_id or p.get("id") == killer_id):
+                killer_found = True
+                break
+        if not killer_found:
+            return {"success": False, "message": "Apenas o assassino pode matar"}
+    
+    # ⏳ Verifica turno usando game_state
+    current_turn_id = get_current_turn(room_id)
+    if current_turn_id and killer_id != current_turn_id:
+        # Verifica também pelo nome
+        players = room.get("players", [])
+        current_player = None
+        for p in players:
+            if isinstance(p, dict):
+                player_name = p.get("name", "")
+                if player_name == current_turn_id or p.get("id") == current_turn_id:
+                    current_player = p
+                    break
+        
+        if current_player and current_player.get("name") != killer_id:
+            return {"success": False, "message": "Não é o seu turno"}
+    
+    # ☠️ Verifica se o alvo está vivo usando game_state
+    if not is_alive(room_id, target_id):
+        return {"success": False, "message": "Este jogador já está morto"}
+    
     players = room.get("players", [])
-    
-    # Encontra o assassino e o alvo
-    killer = None
     target = None
-    
     for p in players:
-        if isinstance(p, dict):
-            if p.get("id") == killer_id or p.get("name") == killer_id:
-                killer = p
-            if p.get("id") == target_id or p.get("name") == target_id:
-                target = p
-    
-    # Validações
-    if not killer:
-        return {"success": False, "message": "Assassino não encontrado"}
-    
-    if not killer.get("is_killer"):
-        return {"success": False, "message": "Apenas o assassino pode matar"}
+        if isinstance(p, dict) and (p.get("id") == target_id or p.get("name") == target_id):
+            target = p
+            break
     
     if not target:
         return {"success": False, "message": "Alvo não encontrado"}
     
-    if target.get("status") == "dead":
-        return {"success": False, "message": "O alvo já está morto"}
-    
     if target.get("is_killer"):
         return {"success": False, "message": "O assassino não pode se matar"}
-    
-    # Verifica se é o turno do assassino
-    current_turn = room.get("current_turn", 0)
-    current_player = players[current_turn] if current_turn < len(players) else None
-    
-    if not current_player or (isinstance(current_player, dict) and 
-                              (current_player.get("id") != killer_id and current_player.get("name") != killer_id)):
-        return {"success": False, "message": "Você só pode matar durante seu turno"}
     
     # Verifica limite de mortes por rodada (1 morte por rodada)
     kills_this_round = room.get("kills_this_round", 0)
     if kills_this_round >= 1:
         return {"success": False, "message": "Limite de 1 morte por rodada atingido"}
     
-    # Mata o jogador
+    # 💀 Mata o jogador (atualiza tanto no room quanto no game_state)
     target["status"] = "dead"
+    kill_player_state(room_id, target_id)  # Atualiza game_state
     room["kills_this_round"] = kills_this_round + 1
     
     # Gera pista após a morte
@@ -1129,13 +1148,33 @@ async def game_loop(room_id: str):
             
             # Envia mensagem privada para o assassino
             killer_name = killer.get("name", f"Jogador {killer_index + 1}")
-            await send_private_message(room_id, killer_name, {
-                "type": "you_are_killer",
-                "message": f"🔪 Você é o ASSASSINO! Seu objetivo é eliminar todos os outros jogadores sem ser descoberto. Você pode matar 1 jogador por rodada durante seu turno.",
-                "secret": True
-            })
+            killer_id = killer.get("id", killer_index) or killer_name
             
-            print(f"🔪 Assassino escolhido: {killer_name}")
+            # Salva o assassino no game_state
+            set_killer_id(room_id, killer_id)
+            
+            # Registra todos os jogadores no game_state
+            for i, p in enumerate(participantes):
+                if isinstance(p, dict):
+                    player_id = p.get("id") or p.get("name") or f"Jogador {i+1}"
+                    register_player(room_id, player_id)
+            
+            # Encontra o WebSocket do assassino e envia mensagem privada
+            if room_id in CONNECTIONS:
+                for ws in CONNECTIONS[room_id]:
+                    try:
+                        # Envia para todos, mas o frontend filtra baseado no player_id
+                        await ws.send_text(json.dumps({
+                            "type": "you_are_killer",
+                            "player_id": killer_id,
+                            "player_name": killer_name,
+                            "message": f"🔪 Você é o ASSASSINO! Seu objetivo é eliminar todos os outros jogadores sem ser descoberto. Você pode matar 1 jogador por rodada durante seu turno.",
+                            "secret": True
+                        }))
+                    except:
+                        pass
+            
+            print(f"🔪 Assassino escolhido: {killer_name} (ID: {killer_id})")
     
     # Inicializa contador de mortes da rodada
     room["kills_this_round"] = 0
@@ -1229,6 +1268,10 @@ async def game_loop(room_id: str):
             player_name = player_data.get("name", f"Jogador {idx+1}") if isinstance(player_data, dict) else str(player_data)
             is_killer = player_data.get("is_killer", False) if isinstance(player_data, dict) else False
             player_id = player_data.get("id", idx) if isinstance(player_data, dict) else idx
+            player_identifier = player_data.get("id") or player_name if isinstance(player_data, dict) else player_name
+            
+            # Atualiza o turno atual no game_state
+            set_current_turn(room_id, player_identifier)
             
             # Não revela se é bot ou humano - todos são suspeitos
             # Envia is_killer apenas para o próprio jogador (frontend filtra)
@@ -1236,6 +1279,7 @@ async def game_loop(room_id: str):
                 "type": "turn_start",
                 "player": player_name,
                 "player_id": player_id,
+                "player_identifier": player_identifier,  # ID usado no game_state
                 "turn_index": idx,
                 "time_limit": 120,
                 "is_killer": is_killer  # Frontend filtra e mostra apenas para o próprio jogador
@@ -1336,6 +1380,10 @@ async def ws_room(websocket: WebSocket, room_id: str):
     if player_id not in room.get("players", []) and player_id <= 12:
         room["players"].append(player_id)
     
+    # Registra o jogador no game_state
+    player_identifier = user_nickname or (user_email.split("@")[0] if user_email else f"Jogador {player_id}")
+    register_player(room_id, player_identifier)
+    
     # Inicializa eventos de jogo se necessário
     if room_id not in GAME_EVENTS:
         GAME_EVENTS[room_id] = {
@@ -1416,6 +1464,15 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     else:
                         player_identifier = f"Jogador {player_id}"
                     
+                    # Verifica se é o turno do jogador antes de processar
+                    current_turn_id = get_current_turn(room_id)
+                    if current_turn_id and player_identifier != current_turn_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Não é sua vez. Aguarde o próximo turno."
+                        }))
+                        continue
+                    
                     result = await kill_player(room_id, player_identifier, target_id)
                     
                     if result.get("success"):
@@ -1433,30 +1490,36 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 elif msg_type == "message" or msg_type == "action":
                     # Processa mensagem de chat ou ação do jogador
                     
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        sender_label = user_nickname
+                        player_identifier = user_nickname
+                    elif user_email:
+                        sender_label = user_email.split("@")[0]
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        sender_label = f"Jogador {player_id}"
+                        player_identifier = f"Jogador {player_id}"
+                    
+                    # ⛔ Verifica se é o turno do jogador
+                    current_turn_id = get_current_turn(room_id)
+                    if current_turn_id and player_identifier != current_turn_id:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Não é sua vez. Aguarde o próximo turno."
+                        }))
+                        continue
+                    
                     # Verifica se o jogador está morto
-                    room = ROOMS.get(room_id)
-                    if room:
-                        players = room.get("players", [])
-                        current_player = next((p for p in players if isinstance(p, dict) and 
-                                              (p.get("name") == sender_label or p.get("id") == player_id)), None)
-                        if current_player and current_player.get("status") == "dead":
-                            await websocket.send_text(json.dumps({
-                                "type": "error",
-                                "msg": "Você está morto e não pode mais interagir!"
-                            }))
-                            continue
+                    if not is_alive(room_id, player_identifier):
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "Você está morto e não pode mais interagir!"
+                        }))
+                        continue
                     
                     if room_id in GAME_EVENTS:
                         GAME_EVENTS[room_id]["player_action_event"].set()
-                    
-                    # Envia como uma mensagem de chat para aparecer na lista
-                    # Prioriza nickname, depois email sem @, depois fallback
-                    if user_nickname:
-                        sender_label = user_nickname
-                    elif user_email:
-                        sender_label = user_email.split("@")[0]
-                    else:
-                        sender_label = f"Jogador {player_id}"
                     message_text = data.get("text") or data.get("content", "Realizou uma ação")
                     
                     # Adiciona ao histórico do chat da sala (sem indicar se é bot ou humano)
