@@ -6,7 +6,10 @@ from pathlib import Path
 from datetime import datetime
 from groq import Groq  # pyright: ignore[reportMissingImports]
 from openai import OpenAI  # pyright: ignore[reportMissingImports]
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response  # pyright: ignore[reportMissingImports]
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response, status  # pyright: ignore[reportMissingImports]
+from fastapi.responses import JSONResponse  # pyright: ignore[reportMissingImports]
+from fastapi.exceptions import RequestValidationError  # pyright: ignore[reportMissingImports]
+from starlette.exceptions import HTTPException as StarletteHTTPException  # pyright: ignore[reportMissingImports]
 from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
@@ -111,6 +114,58 @@ async def add_cors_headers(request: Request, call_next):
     else:
         response = await call_next(request)
         return response
+
+# Exception handlers globais para garantir CORS mesmo em erros
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Handler para exceções HTTP que garante CORS"""
+    origin = request.headers.get("origin")
+    response = JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail}
+    )
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handler para erros de validação que garante CORS"""
+    origin = request.headers.get("origin")
+    response = JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors()}
+    )
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
+
+
+@app.exception_handler(Exception)
+async def general_exception_handler(request: Request, exc: Exception):
+    """Handler para erros gerais (500) que garante CORS"""
+    import traceback
+    print(f"❌ Erro não tratado: {exc}")
+    print(traceback.format_exc())
+    
+    origin = request.headers.get("origin")
+    response = JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": f"Erro interno do servidor: {str(exc)}"}
+    )
+    if origin and origin in allowed_origins:
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+    return response
 
 app.include_router(auth_router)
 

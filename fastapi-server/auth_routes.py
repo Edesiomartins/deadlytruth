@@ -20,26 +20,58 @@ def get_db():
 
 @router.post("/register", response_model=UserOut, status_code=201)
 def register(user: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email já registrado.")
-    
-    # Verifica se nickname já existe (se fornecido)
-    if user.nickname:
-        existing_nickname = db.query(User).filter(User.nickname == user.nickname).first()
-        if existing_nickname:
-            raise HTTPException(status_code=400, detail="Nickname já está em uso.")
+    try:
+        existing_user = db.query(User).filter(User.email == user.email).first()
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email já registrado.")
+        
+        # Verifica se nickname já existe (se fornecido)
+        if user.nickname:
+            try:
+                existing_nickname = db.query(User).filter(User.nickname == user.nickname).first()
+                if existing_nickname:
+                    raise HTTPException(status_code=400, detail="Nickname já está em uso.")
+            except Exception as e:
+                # Se a coluna nickname não existir, ignora a verificação
+                error_str = str(e).lower()
+                if "nickname" in error_str or "column" in error_str or "does not exist" in error_str:
+                    print("⚠️ Coluna nickname não existe ainda, pulando verificação")
+                else:
+                    raise
 
-    hashed_password = get_password_hash(user.password)
-    db_user = User(
-        email=user.email, 
-        hashed_password=hashed_password,
-        nickname=user.nickname
-    )
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    return db_user
+        hashed_password = get_password_hash(user.password)
+        
+        # Tenta criar com nickname, se falhar cria sem
+        try:
+            db_user = User(
+                email=user.email, 
+                hashed_password=hashed_password,
+                nickname=user.nickname
+            )
+        except Exception as e:
+            # Se falhar por causa da coluna nickname, cria sem ela
+            print(f"⚠️ Erro ao criar com nickname, tentando sem: {e}")
+            db_user = User(
+                email=user.email, 
+                hashed_password=hashed_password
+            )
+        
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        
+        # Garante que nickname seja None se não existir no banco
+        if not hasattr(db_user, 'nickname'):
+            db_user.nickname = None
+            
+        return db_user
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Erro no registro: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Erro ao criar usuário: {str(e)}")
 
 
 @router.post("/login", response_model=Token)
@@ -74,6 +106,9 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):
+    # Garante que nickname seja None se não existir no banco
+    if not hasattr(current_user, 'nickname'):
+        current_user.nickname = None
     return current_user
 
 
