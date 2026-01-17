@@ -86,6 +86,20 @@ export default function Lobby() {
           console.log("📊 Status:", data.msg);
         }
         
+        if (data.type === "jogadores") {
+          // Recebe lista atualizada de jogadores do servidor
+          if (data.players && Array.isArray(data.players)) {
+            const updatedPlayers = data.players.map((p, idx) => ({
+              id: idx + 1,
+              name: p.name || p.id || `Jogador ${idx + 1}`,
+              status: p.status || "online",
+              role: p.role || "Suspeito",
+              isBot: p.isBot || p.is_bot || false
+            }));
+            setPlayers(updatedPlayers);
+          }
+        }
+        
         if (data.type === "players_update") {
           // Atualiza a lista de jogadores com a lista do servidor
           if (data.players && Array.isArray(data.players)) {

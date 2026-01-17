@@ -218,10 +218,29 @@ export default function Game() {
           }
         }
         
-        if (data.type === "jogadores" || data.type === "players_update") {
+        if (data.type === "jogadores") {
+          // Atualiza lista de jogadores recebida do servidor
+          if (data.players && Array.isArray(data.players)) {
+            const updatedPlayers = data.players.map((p, idx) => ({
+              id: idx + 1,
+              name: p.name || p.id || `Jogador ${idx + 1}`,
+              status: p.status || "alive",
+              isBot: p.isBot || false
+            }));
+            setPlayersList(updatedPlayers);
+          }
+        }
+        
+        if (data.type === "players_update") {
           // Atualiza lista de jogadores
-          if (data.players) {
-            setPlayersList(data.players);
+          if (data.players && Array.isArray(data.players)) {
+            const updatedPlayers = data.players.map((p, idx) => ({
+              id: idx + 1,
+              name: p.name || p.id || `Jogador ${idx + 1}`,
+              status: p.status || "alive",
+              isBot: p.isBot || false
+            }));
+            setPlayersList(updatedPlayers);
           }
         }
         

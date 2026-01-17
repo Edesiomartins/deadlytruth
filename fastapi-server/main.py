@@ -979,6 +979,35 @@ async def broadcast(room_id: str, message: dict):
             print(f"Failed to send to WebSocket: {e}")
 
 
+async def broadcast_players(room_id: str):
+    """Envia lista atualizada de jogadores para todos os conectados na sala"""
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    
+    # Pega a lista de jogadores da sala e do game_state
+    players_list = room.get("players", [])
+    
+    # Formata a lista para enviar
+    formatted_players = []
+    for p in players_list:
+        if isinstance(p, dict):
+            player_id = p.get("id") or p.get("name") or "Jogador"
+            player_status = get_player_status(room_id, player_id)
+            formatted_players.append({
+                "id": player_id,
+                "name": p.get("name") or player_id,
+                "status": player_status if player_status != "unknown" else p.get("status", "alive"),
+                "isBot": p.get("isBot") or p.get("is_bot", False)
+            })
+    
+    # Envia para todos
+    await broadcast(room_id, {
+        "type": "jogadores",
+        "players": formatted_players
+    })
+
+
 async def send_private_message(room_id: str, player_id: str, message: dict):
     """Envia mensagem privada para um jogador específico"""
     # Encontra o WebSocket do jogador pelo player_id ou nome
@@ -1315,6 +1344,25 @@ async def game_loop(room_id: str):
     try:
         case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
         
+        # 🔍 Extrai pistas automáticas a partir do caso gerado
+        historia = case_data.get("historia", "")
+        descricao = case_data.get("descricao", "")
+        
+        # Gera pistas automáticas a partir de palavras-chave
+        texto_completo = f"{historia} {descricao}".lower()
+        frases_importantes = []
+        
+        for linha in (historia + " " + descricao).split("."):
+            linha_lower = linha.lower().strip()
+            if any(palavra in linha_lower for palavra in ["encontrado", "pista", "objeto", "vestígio", "sangue", "arma", "pegada", "impressão", "documento", "carta", "nota", "marca", "cicatriz", "tatuagem", "anél", "relógio", "foto", "vídeo"]):
+                if len(linha_lower) > 10:  # Ignora frases muito curtas
+                    pista_extraida = linha.strip()
+                    if pista_extraida and pista_extraida not in frases_importantes:
+                        frases_importantes.append(pista_extraida)
+                        add_clue(room_id, pista_extraida)
+        
+        print(f"🔍 {len(frases_importantes)} pistas extraídas automaticamente do caso")
+        
         # Garante que case_data seja um dict
         if not isinstance(case_data, dict):
             print(f"⚠️ case_data não é dict, convertendo... Tipo: {type(case_data)}")
@@ -1648,6 +1696,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
         "players": room.get("players", []),
         "new_player": player_identifier
     })
+    
+    # Envia lista atualizada de jogadores usando a nova função
+    await broadcast_players(room_id)
     
     # Inicializa eventos de jogo se necessário
     if room_id not in GAME_EVENTS:
@@ -2079,6 +2130,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 "players": room.get("players", []),
                 "removed_player": player_identifier
             })
+            
+            # Envia lista atualizada de jogadores
+            await broadcast_players(room_id)
         if not CONNECTIONS[room_id]:  # Remove sala vazia
             del CONNECTIONS[room_id]
             if room_id in GAME_EVENTS:
