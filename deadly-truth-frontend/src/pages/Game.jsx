@@ -79,7 +79,14 @@ export default function Game() {
           // Se o caso vier como string JSON, tenta parsear
           if (typeof caseData === "string") {
             try {
-              caseData = JSON.parse(caseData);
+              // Tenta extrair JSON de markdown se necessário
+              let jsonStr = caseData;
+              if (jsonStr.includes('```json')) {
+                const match = jsonStr.match(/```json\s*([\s\S]*?)\s*```/);
+                if (match) jsonStr = match[1];
+              }
+              caseData = JSON.parse(jsonStr);
+              console.log("✅ Caso parseado de string para objeto");
             } catch (e) {
               console.error("Erro ao parsear caso:", e);
               caseData = {
@@ -106,7 +113,7 @@ export default function Game() {
             };
           }
           
-          // Define o caso se for válido
+          // Define o caso se for válido (sempre como objeto)
           if (caseData && typeof caseData === "object") {
             console.log("✅ Caso recebido via game_start:", caseData);
             setCaso(caseData);
@@ -338,18 +345,35 @@ export default function Game() {
           // Recebe o caso como texto e processa
           console.log("📋 Mensagem 'caso' recebida:", data);
           try {
-            const parsed = JSON.parse(data.text);
-            console.log("✅ Caso parseado com sucesso:", parsed);
-            setCaso(parsed);
-            setGameCase(parsed); // Também atualiza gameCase para compatibilidade
-            addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+            let jsonStr = data.text;
             
-            // Mostra descrição do caso se disponível
-            if (parsed.descricao) {
-              const desc = parsed.descricao.length > 200 
-                ? parsed.descricao.substring(0, 200) + "..." 
-                : parsed.descricao;
-              addSystemMessage(`📋 ${desc}`);
+            // Tenta extrair JSON de markdown se necessário
+            if (jsonStr.includes('```json')) {
+              const match = jsonStr.match(/```json\s*([\s\S]*?)\s*```/);
+              if (match) {
+                jsonStr = match[1];
+                console.log("📝 JSON extraído de markdown");
+              }
+            }
+            
+            const parsed = JSON.parse(jsonStr);
+            console.log("✅ Caso parseado com sucesso:", parsed);
+            
+            // Garante que seja um objeto válido
+            if (parsed && typeof parsed === "object") {
+              setCaso(parsed);
+              setGameCase(parsed); // Também atualiza gameCase para compatibilidade
+              addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+              
+              // Mostra descrição do caso se disponível
+              if (parsed.descricao) {
+                const desc = parsed.descricao.length > 200 
+                  ? parsed.descricao.substring(0, 200) + "..." 
+                  : parsed.descricao;
+                addSystemMessage(`📋 ${desc}`);
+              }
+            } else {
+              throw new Error("Caso parseado não é um objeto válido");
             }
           } catch (error) {
             console.error("❌ Erro ao parsear o caso:", error);
@@ -593,23 +617,33 @@ export default function Game() {
             </div>
           )}
           
-          {gameCase ? (
+          {/* Fallback: Exibe gameCase se caso não estiver disponível */}
+          {!caso && gameCase && (
             <div className="p-4 space-y-4">
               {/* Garante que gameCase seja um objeto */}
               {(() => {
                 if (typeof gameCase === 'string') {
                   try {
-                    const parsed = JSON.parse(gameCase);
-                    gameCase = parsed;
-                    setGameCase(parsed); // Atualiza o estado
+                    // Tenta extrair JSON de markdown se necessário
+                    let jsonStr = gameCase;
+                    if (jsonStr.includes('```json')) {
+                      const match = jsonStr.match(/```json\s*([\s\S]*?)\s*```/);
+                      if (match) jsonStr = match[1];
+                    }
+                    const parsed = JSON.parse(jsonStr);
+                    setGameCase(parsed);
+                    setCaso(parsed); // Também atualiza caso
+                    return null;
                   } catch (e) {
                     console.error("Erro ao parsear caso:", e);
+                    return null;
                   }
                 }
                 return null;
               })()}
               
-              {gameCase?.descricao && (
+              {/* Só renderiza se gameCase for um objeto, não string */}
+              {typeof gameCase === 'object' && gameCase !== null && gameCase?.descricao && (
                 <div>
                   <h3 className="text-sm font-bold text-white mb-2 font-cinzel">Descrição</h3>
                   <p className="text-sm text-offWhite/80 font-roboto leading-relaxed whitespace-pre-wrap">
