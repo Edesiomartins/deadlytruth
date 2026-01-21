@@ -26,6 +26,9 @@ export default function Game() {
   const [gameTimeRemaining, setGameTimeRemaining] = useState(7200); // Tempo restante do jogo em segundos (120 min)
   const [gameElapsedTime, setGameElapsedTime] = useState(0); // Tempo decorrido do jogo
   const [canEndGame, setCanEndGame] = useState(false); // Se já passou o tempo mínimo
+  const [caso, setCaso] = useState(null); // Caso recebido via mensagem tipo "caso"
+  const [pistas, setPistas] = useState([]); // Lista de pistas descobertas
+  const [turnoAtual, setTurnoAtual] = useState(null); // ID do jogador da vez
   
   const messagesEndRef = useRef(null);
   const turnTimerRef = useRef(null);
@@ -121,7 +124,11 @@ export default function Game() {
           setCurrentTurn(data.turn_index || 0);
           const playerName = data.player;
           const playerIdentifier = data.player_identifier || playerName;
+          const playerId = data.player_id || data.player_identifier || playerName;
           setCurrentPlayerName(playerName);
+          
+          // Atualiza turnoAtual com o ID do jogador da vez
+          setTurnoAtual(playerId);
           
           // Atualiza tempos
           if (data.time_limit) {
@@ -152,9 +159,17 @@ export default function Game() {
             });
           }, 1000);
           
-          // Verifica se é a vez do jogador atual (compara com identifier também)
+          // Verifica se é a vez do jogador atual
           const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
-          setIsMyTurn(playerName === myName || playerIdentifier === myName);
+          const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
+          
+          // Compara IDs (convertendo para número se necessário)
+          const isMyTurn = playerId === meuID || 
+                          parseInt(playerId) === parseInt(meuID) ||
+                          playerName === myName || 
+                          playerIdentifier === myName ||
+                          playerIdentifier === meuID;
+          setIsMyTurn(isMyTurn);
           
           // Todos são suspeitos - não revela se é bot ou humano
           addSystemMessage(`🔍 Vez de ${playerName} (${turnTime}s)`);
@@ -303,10 +318,10 @@ export default function Game() {
         }
         
         if (data.type === "pista") {
-          const novaMensagem = {
-            username: "🧠 MESTRE",
-            text: data.text,
-          };
+          // Adiciona pista à lista de pistas
+          setPistas((prev) => [...prev, data.text]);
+          
+          // Também adiciona como mensagem no chat
           setMessages((prev) => [...prev, {
             id: Date.now(),
             player: "🧠 MESTRE",
@@ -318,42 +333,20 @@ export default function Game() {
         if (data.type === "caso") {
           // Recebe o caso como texto e processa
           try {
-            let caseText = data.text;
+            const parsedCase = JSON.parse(data.text);
+            setCaso(parsedCase);
+            setGameCase(parsedCase); // Também atualiza gameCase para compatibilidade
+            addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
             
-            // Extrai JSON de markdown se necessário (```json...```)
-            if (typeof caseText === "string") {
-              // Remove blocos de markdown
-              caseText = caseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-              
-              // Tenta fazer parse do JSON
-              let caseData;
-              try {
-                caseData = JSON.parse(caseText);
-              } catch (parseError) {
-                // Se falhar, tenta extrair JSON do texto
-                const jsonMatch = caseText.match(/\{[\s\S]*\}/);
-                if (jsonMatch) {
-                  caseData = JSON.parse(jsonMatch[0]);
-                } else {
-                  throw new Error("Não foi possível extrair JSON do caso");
-                }
-              }
-              
-              if (caseData && typeof caseData === "object") {
-                setGameCase(caseData);
-                addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
-                
-                // Mostra descrição do caso se disponível
-                if (caseData.descricao) {
-                  const desc = caseData.descricao.length > 200 
-                    ? caseData.descricao.substring(0, 200) + "..." 
-                    : caseData.descricao;
-                  addSystemMessage(`📋 ${desc}`);
-                }
-              }
+            // Mostra descrição do caso se disponível
+            if (parsedCase.descricao) {
+              const desc = parsedCase.descricao.length > 200 
+                ? parsedCase.descricao.substring(0, 200) + "..." 
+                : parsedCase.descricao;
+              addSystemMessage(`📋 ${desc}`);
             }
-          } catch (e) {
-            console.error("Erro ao processar caso:", e);
+          } catch (error) {
+            console.error("Erro ao parsear o caso:", error);
             console.error("Texto recebido:", data.text);
             addSystemMessage("⚠️ Erro ao processar o caso. Verifique o console.");
           }
@@ -361,9 +354,19 @@ export default function Game() {
         
         if (data.type === "turno") {
           // Atualiza o turno atual para validação
+          setTurnoAtual(data.player_id);
+          
+          // Também atualiza isMyTurn para compatibilidade
           const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
           const currentPlayerId = data.player_id;
-          setIsMyTurn(currentPlayerId === myName || currentPlayerId?.toLowerCase() === myName?.toLowerCase());
+          
+          // Compara IDs (convertendo para número se necessário)
+          const isMyTurn = currentPlayerId === meuID || 
+                          parseInt(currentPlayerId) === parseInt(meuID) ||
+                          currentPlayerId === myName || 
+                          currentPlayerId?.toLowerCase() === myName?.toLowerCase();
+          setIsMyTurn(isMyTurn);
         }
         
       } catch (e) {
@@ -540,6 +543,49 @@ export default function Game() {
               O Caso
             </h2>
           </div>
+          
+          {/* Exibe caso recebido via mensagem tipo "caso" */}
+          {caso && (
+            <div className="p-4 space-y-3 border-b border-accentRed/30">
+              <h2 className="text-lg font-bold text-accentRed font-cinzel">🗂️ Caso #{caso.case_id}</h2>
+              <div className="space-y-2 text-sm font-roboto">
+                <p><strong className="text-white">Nível:</strong> <span className="text-offWhite/80">{caso.nivel}</span></p>
+                <p><strong className="text-white">Cenário:</strong> <span className="text-offWhite/80">{caso.cenario}</span></p>
+                {caso.descricao && (
+                  <div>
+                    <p className="text-white font-semibold mb-1">Descrição:</p>
+                    <p className="text-offWhite/80 leading-relaxed">{caso.descricao}</p>
+                  </div>
+                )}
+                {caso.historia && (
+                  <div>
+                    <p className="text-white font-semibold mb-1">História:</p>
+                    <p className="text-offWhite/80 leading-relaxed">{caso.historia}</p>
+                  </div>
+                )}
+                {caso.suspeitos && caso.suspeitos.length > 0 && (
+                  <p><strong className="text-white">Suspeitos:</strong> <span className="text-offWhite/80">{caso.suspeitos.join(", ")}</span></p>
+                )}
+              </div>
+            </div>
+          )}
+          
+          {/* Exibe pistas descobertas */}
+          {pistas.length > 0 && (
+            <div className="p-4 border-b border-accentRed/30">
+              <h3 className="text-sm font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-3">
+                🧩 Pistas Descobertas
+              </h3>
+              <ul className="space-y-2 max-h-64 overflow-y-auto">
+                {pistas.map((pista, index) => (
+                  <li key={index} className="text-xs text-offWhite/80 font-roboto flex items-start gap-2">
+                    <span className="text-accentRed mt-1">•</span>
+                    <span>{pista}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           
           {gameCase ? (
             <div className="p-4 space-y-4">
@@ -751,13 +797,18 @@ export default function Game() {
               </div>
             ) : (
               <>
-                {!isMyTurn && currentPlayerName && (
-                  <div className="mb-2 px-3 py-2 bg-accentRed/20 border border-accentRed/30 rounded-lg">
-                    <p className="text-xs text-accentRed/80 font-roboto text-center">
-                      ⏳ Aguarde sua vez. É a vez de <span className="font-bold text-accentRed">{currentPlayerName}</span>
-                    </p>
-                  </div>
-                )}
+                {(() => {
+                  const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || user?.nickname || "Você";
+                  const naoEhMinhaVez = turnoAtual && turnoAtual !== meuID && parseInt(turnoAtual) !== parseInt(meuID);
+                  
+                  return naoEhMinhaVez && currentPlayerName && (
+                    <div className="mb-2 px-3 py-2 bg-accentRed/20 border border-accentRed/30 rounded-lg">
+                      <p className="text-xs text-accentRed/80 font-roboto text-center">
+                        ⏳ Aguarde sua vez. É a vez de <span className="font-bold text-accentRed">{currentPlayerName}</span>
+                      </p>
+                    </div>
+                  );
+                })()}
                 <div className="flex gap-2">
                   <input
                     type="text"
