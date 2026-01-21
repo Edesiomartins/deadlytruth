@@ -2246,7 +2246,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 })
     except WebSocketDisconnect:
         if websocket in CONNECTIONS.get(room_id, []):
-        CONNECTIONS[room_id].remove(websocket)
+            CONNECTIONS[room_id].remove(websocket)
         
         # Remove jogador da lista
         room = ROOMS.get(room_id)
