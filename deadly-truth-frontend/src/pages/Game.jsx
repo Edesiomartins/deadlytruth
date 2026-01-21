@@ -230,6 +230,11 @@ export default function Game() {
           if (data.payload?.players && Array.isArray(data.payload.players)) {
             setPlayers(data.payload.players);
           }
+          // Handler para caso recebido via hello
+          if (data.case) {
+            setCaso(data.case);
+            setGameCase(data.case); // Também atualiza gameCase para compatibilidade
+          }
         }
         
         if (data.type === "jogadores") {
@@ -326,16 +331,16 @@ export default function Game() {
         if (data.type === "caso") {
           // Recebe o caso como texto e processa
           try {
-            const parsedCase = JSON.parse(data.text);
-            setCaso(parsedCase);
-            setGameCase(parsedCase); // Também atualiza gameCase para compatibilidade
+            const parsed = JSON.parse(data.text);
+            setCaso(parsed);
+            setGameCase(parsed); // Também atualiza gameCase para compatibilidade
             addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
             
             // Mostra descrição do caso se disponível
-            if (parsedCase.descricao) {
-              const desc = parsedCase.descricao.length > 200 
-                ? parsedCase.descricao.substring(0, 200) + "..." 
-                : parsedCase.descricao;
+            if (parsed.descricao) {
+              const desc = parsed.descricao.length > 200 
+                ? parsed.descricao.substring(0, 200) + "..." 
+                : parsed.descricao;
               addSystemMessage(`📋 ${desc}`);
             }
           } catch (error) {
