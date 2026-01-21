@@ -21,7 +21,6 @@ export default function Game() {
   const [accusedPlayer, setAccusedPlayer] = useState(null); // Jogador acusado
   const [myVote, setMyVote] = useState(null); // Voto do jogador atual
   const [playerStatus, setPlayerStatus] = useState("alive"); // Status do jogador atual (alive/dead)
-  const [playersList, setPlayersList] = useState([]); // Lista de jogadores com status
   const [turnTimeRemaining, setTurnTimeRemaining] = useState(60); // Tempo restante do turno em segundos
   const [gameTimeRemaining, setGameTimeRemaining] = useState(7200); // Tempo restante do jogo em segundos (120 min)
   const [gameElapsedTime, setGameElapsedTime] = useState(0); // Tempo decorrido do jogo
@@ -228,34 +227,28 @@ export default function Game() {
         if (data.type === "hello") {
           console.log("✅ Conectado à sala", data.payload);
           // Inicializa lista de jogadores se disponível
-          if (data.payload?.players) {
-            setPlayersList(data.payload.players);
+          if (data.payload?.players && Array.isArray(data.payload.players)) {
+            setPlayers(data.payload.players);
           }
         }
         
         if (data.type === "jogadores") {
           // Atualiza lista de jogadores recebida do servidor
-          if (data.players && Array.isArray(data.players)) {
-            const updatedPlayers = data.players.map((p, idx) => ({
-              id: idx + 1,
-              name: p.name || p.id || `Jogador ${idx + 1}`,
-              status: p.status || "alive",
-              isBot: p.isBot || false
-            }));
-            setPlayersList(updatedPlayers);
+          if (Array.isArray(data.players)) {
+            setPlayers(data.players);
+          } else {
+            console.warn("jogadores recebido, mas players não é array:", data.players);
+            setPlayers([]);
           }
         }
         
         if (data.type === "players_update") {
-          // Atualiza lista de jogadores
-          if (data.players && Array.isArray(data.players)) {
-            const updatedPlayers = data.players.map((p, idx) => ({
-              id: idx + 1,
-              name: p.name || p.id || `Jogador ${idx + 1}`,
-              status: p.status || "alive",
-              isBot: p.isBot || false
-            }));
-            setPlayersList(updatedPlayers);
+          // Atualiza lista de jogadores diretamente
+          if (Array.isArray(data.players)) {
+            setPlayers(data.players);
+          } else {
+            console.warn("players_update recebido, mas players não é array:", data.players);
+            setPlayers([]);
           }
         }
         
@@ -277,8 +270,8 @@ export default function Game() {
           }
           
           // Atualiza lista de jogadores
-          setPlayersList(prev => prev.map(p => 
-            p.name === victimName ? { ...p, status: "dead" } : p
+          setPlayers(prev => prev.map(p => 
+            p.name === victimName || p.id === victimName ? { ...p, status: "dead" } : p
           ));
         }
         
@@ -673,35 +666,51 @@ export default function Game() {
           
           {/* Lista de Jogadores */}
           <div className="mt-auto border-t border-accentRed/30 p-4">
-            <div className="mb-4">
-              <h3 className="text-xs font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-2">
-                🎮 Jogadores
-              </h3>
-              <ul className="space-y-1">
-                {playersList.filter(p => p.status === "alive" || !p.status).map((p, idx) => (
-                  <li key={idx} className="text-xs text-offWhite/80 font-roboto flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                    {p.name || p.id || `Jogador ${idx + 1}`}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            
-            {playersList.filter(p => p.status === "dead").length > 0 && (
-              <div>
-                <h3 className="text-xs font-bold text-gray-400/70 uppercase tracking-wider font-roboto mb-2">
-                  👻 Espectadores
-                </h3>
-                <ul className="space-y-1">
-                  {playersList.filter(p => p.status === "dead").map((p, idx) => (
-                    <li key={idx} className="text-xs text-gray-400/60 font-roboto flex items-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-                      {p.name || p.id || `Jogador ${idx + 1}`}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            {(() => {
+              const alivePlayers = Array.isArray(players)
+                ? players.filter(p => p.status === "alive" || !p.status)
+                : [];
+              
+              const deadPlayers = Array.isArray(players)
+                ? players.filter(p => p.status === "dead")
+                : [];
+              
+              return (
+                <>
+                  {alivePlayers.length > 0 && (
+                    <div className="mb-4">
+                      <h3 className="text-xs font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-2">
+                        🎮 Jogadores
+                      </h3>
+                      <ul className="space-y-1">
+                        {alivePlayers.map((p, idx) => (
+                          <li key={idx} className="text-xs text-offWhite/80 font-roboto flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                            {p.name || p.id || `Jogador ${idx + 1}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  
+                  {deadPlayers.length > 0 && (
+                    <div>
+                      <h3 className="text-xs font-bold text-gray-400/70 uppercase tracking-wider font-roboto mb-2">
+                        👻 Espectadores
+                      </h3>
+                      <ul className="space-y-1">
+                        {deadPlayers.map((p, idx) => (
+                          <li key={idx} className="text-xs text-gray-400/60 font-roboto flex items-center gap-2">
+                            <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+                            {p.name || p.id || `Jogador ${idx + 1}`}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
           </div>
         </div>
 
