@@ -1448,8 +1448,11 @@ async def game_loop(room_id: str):
             if pista_extraida:
                 add_clue(room_id, pista_extraida)
     
+    # Inicializa variável para pistas extraídas
+    frases_importantes = []
+    
     try:
-    case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+        case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
         
         # 🔍 Extrai pistas automáticas a partir do caso gerado
         historia = case_data.get("historia", "")
@@ -1457,7 +1460,6 @@ async def game_loop(room_id: str):
         
         # Gera pistas automáticas a partir de palavras-chave
         texto_completo = f"{historia} {descricao}".lower()
-        frases_importantes = []
         
         for linha in (historia + " " + descricao).split("."):
             linha_lower = linha.lower().strip()
@@ -1525,22 +1527,22 @@ async def game_loop(room_id: str):
     case_summary = f"{case_data.get('descricao', '')} {case_data.get('historia', '')}"
     set_case_summary(room_id, case_summary)
     
-        # Adiciona evidências iniciais ao game_state e envia como pistas
-        evidencias = case_data.get("evidencias", [])
-        for evidencia in evidencias:
-            add_clue(room_id, evidencia)
-            # Envia pista inicial como mensagem tipo "pista"
-            await broadcast(room_id, {
-                "type": "pista",
-                "text": evidencia
-            })
-        
-        # Envia pistas extraídas automaticamente
-        for pista in frases_importantes:
-            await broadcast(room_id, {
-                "type": "pista",
-                "text": pista
-            })
+    # Adiciona evidências iniciais ao game_state e envia como pistas
+    evidencias = case_data.get("evidencias", [])
+    for evidencia in evidencias:
+        add_clue(room_id, evidencia)
+        # Envia pista inicial como mensagem tipo "pista"
+        await broadcast(room_id, {
+            "type": "pista",
+            "text": evidencia
+        })
+    
+    # Envia pistas extraídas automaticamente
+    for pista in frases_importantes:
+        await broadcast(room_id, {
+            "type": "pista",
+            "text": pista
+        })
 
     # Validação final: garante que case_data seja um dict válido antes de enviar
     if not isinstance(case_data, dict):
