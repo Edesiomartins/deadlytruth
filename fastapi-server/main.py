@@ -1589,10 +1589,14 @@ async def game_loop(room_id: str):
     set_case_summary(room_id, case_summary)
     
     # Envia mensagem tipo "caso" com o caso processado (já como objeto JSON)
+    # IMPORTANTE: Envia como string JSON para o handler "caso" no frontend
     await broadcast(room_id, {
         "type": "caso",
         "text": json.dumps(case_data)  # Envia como JSON string do objeto processado
     })
+    
+    # Log para debug
+    print(f"📤 Mensagem 'caso' enviada (tipo: caso, text: JSON string)")
     
     # Adiciona evidências iniciais ao game_state e envia como pistas
     evidencias = case_data.get("evidencias", [])
@@ -1636,6 +1640,7 @@ async def game_loop(room_id: str):
     print(f"   Tipo: {type(case_data)}, Keys: {list(case_data.keys())[:5] if isinstance(case_data, dict) else 'N/A'}...")
 
     # Enviar para todos com o campo 'content' e 'case' padronizados
+    # IMPORTANTE: Envia como objeto para o handler "game_start" no frontend
     await broadcast(room_id, {
         "type": "game_start",
         "payload": {
@@ -1643,6 +1648,9 @@ async def game_loop(room_id: str):
             "case": case_data  # O React vai ler isso aqui - deve ser um objeto, não string
         }
     })
+    
+    # Log para debug
+    print(f"📤 Mensagem 'game_start' enviada (tipo: game_start, payload.case: objeto)")
 
     # 2. Inicia a sequência de turnos com controle de tempo
     import time

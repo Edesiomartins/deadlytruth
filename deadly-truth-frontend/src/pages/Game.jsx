@@ -73,6 +73,7 @@ export default function Game() {
         console.log("📨 Mensagem recebida:", data);
         
         if (data.type === "game_start") {
+          console.log("🎮 game_start recebido:", data);
           let caseData = data.payload?.case;
           
           // Se o caso vier como string JSON, tenta parsear
@@ -105,7 +106,12 @@ export default function Game() {
             };
           }
           
-          setGameCase(caseData);
+          // Define o caso se for válido
+          if (caseData && typeof caseData === "object") {
+            console.log("✅ Caso recebido via game_start:", caseData);
+            setCaso(caseData);
+            setGameCase(caseData);
+          }
           
           // Mensagem do mestre anunciando o caso
           const caseDesc = caseData.descricao || "Um novo mistério foi revelado...";
@@ -330,8 +336,10 @@ export default function Game() {
         
         if (data.type === "caso") {
           // Recebe o caso como texto e processa
+          console.log("📋 Mensagem 'caso' recebida:", data);
           try {
             const parsed = JSON.parse(data.text);
+            console.log("✅ Caso parseado com sucesso:", parsed);
             setCaso(parsed);
             setGameCase(parsed); // Também atualiza gameCase para compatibilidade
             addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
@@ -344,7 +352,7 @@ export default function Game() {
               addSystemMessage(`📋 ${desc}`);
             }
           } catch (error) {
-            console.error("Erro ao parsear o caso:", error);
+            console.error("❌ Erro ao parsear o caso:", error);
             console.error("Texto recebido:", data.text);
             addSystemMessage("⚠️ Erro ao processar o caso. Verifique o console.");
           }
