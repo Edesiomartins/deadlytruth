@@ -1502,12 +1502,6 @@ async def game_loop(room_id: str):
     # Salva o resumo do caso no game_state (alinhado com a dinâmica: todos são suspeitos, um é assassino)
     set_case_summary(room_id, case_json)
     
-    # Envia mensagem tipo "caso" com o summary para o frontend
-    await broadcast(room_id, {
-        "type": "caso",
-        "text": case_json
-    })
-    
     # Extrai pistas básicas do texto do caso (linhas que contêm "pista:")
     for line in case_json.splitlines():
         if "pista:" in line.lower() or "pista" in line.lower():
@@ -1593,6 +1587,12 @@ async def game_loop(room_id: str):
     # Atualiza o game_state com o resumo formatado do caso
     case_summary = f"{case_data.get('descricao', '')} {case_data.get('historia', '')}"
     set_case_summary(room_id, case_summary)
+    
+    # Envia mensagem tipo "caso" com o caso processado (já como objeto JSON)
+    await broadcast(room_id, {
+        "type": "caso",
+        "text": json.dumps(case_data)  # Envia como JSON string do objeto processado
+    })
     
     # Adiciona evidências iniciais ao game_state e envia como pistas
     evidencias = case_data.get("evidencias", [])

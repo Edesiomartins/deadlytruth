@@ -318,16 +318,44 @@ export default function Game() {
         if (data.type === "caso") {
           // Recebe o caso como texto e processa
           try {
-            let caseData = data.text;
-            if (typeof caseData === "string") {
-              caseData = JSON.parse(caseData);
-            }
-            if (caseData && typeof caseData === "object") {
-              setGameCase(caseData);
-              addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+            let caseText = data.text;
+            
+            // Extrai JSON de markdown se necessário (```json...```)
+            if (typeof caseText === "string") {
+              // Remove blocos de markdown
+              caseText = caseText.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+              
+              // Tenta fazer parse do JSON
+              let caseData;
+              try {
+                caseData = JSON.parse(caseText);
+              } catch (parseError) {
+                // Se falhar, tenta extrair JSON do texto
+                const jsonMatch = caseText.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                  caseData = JSON.parse(jsonMatch[0]);
+                } else {
+                  throw new Error("Não foi possível extrair JSON do caso");
+                }
+              }
+              
+              if (caseData && typeof caseData === "object") {
+                setGameCase(caseData);
+                addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+                
+                // Mostra descrição do caso se disponível
+                if (caseData.descricao) {
+                  const desc = caseData.descricao.length > 200 
+                    ? caseData.descricao.substring(0, 200) + "..." 
+                    : caseData.descricao;
+                  addSystemMessage(`📋 ${desc}`);
+                }
+              }
             }
           } catch (e) {
             console.error("Erro ao processar caso:", e);
+            console.error("Texto recebido:", data.text);
+            addSystemMessage("⚠️ Erro ao processar o caso. Verifique o console.");
           }
         }
         
