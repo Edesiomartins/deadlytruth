@@ -302,6 +302,42 @@ export default function Game() {
           addSystemMessage(data.message || "Voto registrado!");
         }
         
+        if (data.type === "pista") {
+          const novaMensagem = {
+            username: "🧠 MESTRE",
+            text: data.text,
+          };
+          setMessages((prev) => [...prev, {
+            id: Date.now(),
+            player: "🧠 MESTRE",
+            text: data.text,
+            time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+          }]);
+        }
+        
+        if (data.type === "caso") {
+          // Recebe o caso como texto e processa
+          try {
+            let caseData = data.text;
+            if (typeof caseData === "string") {
+              caseData = JSON.parse(caseData);
+            }
+            if (caseData && typeof caseData === "object") {
+              setGameCase(caseData);
+              addSystemMessage("🎭 O MESTRE ANUNCIA: O mistério começou!");
+            }
+          } catch (e) {
+            console.error("Erro ao processar caso:", e);
+          }
+        }
+        
+        if (data.type === "turno") {
+          // Atualiza o turno atual para validação
+          const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          const currentPlayerId = data.player_id;
+          setIsMyTurn(currentPlayerId === myName || currentPlayerId?.toLowerCase() === myName?.toLowerCase());
+        }
+        
       } catch (e) {
         console.error("Erro ao processar mensagem:", e);
       }
