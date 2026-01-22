@@ -1494,23 +1494,66 @@ async def process_bot_votes(room_id: str):
                     logger.error(f"Erro ao processar voto do bot {player_id}: {e}")
 
 
+async def start_game_safe(room_id: str):
+    """
+    Inicia o jogo com tratamento robusto de erros.
+    Versão segura que valida estado antes de iniciar.
+    """
+    room = ROOMS.get(room_id)
+    if not room:
+        logger.warning(f"⚠️ Sala {room_id} não encontrada em start_game_safe")
+        return
+    
+    if room.get("game_active"):
+        logger.warning(f"⚠️ Jogo em {room_id} já está ativo")
+        return
+    
+    try:
+        logger.info(f"🎮 Iniciando jogo seguro em {room_id}")
+        
+        # Marca como ativo ANTES de gerar caso
+        room["game_active"] = True
+        
+        # Chama game_loop que já tem toda a lógica
+        await game_loop(room_id)
+        
+        logger.info(f"✅ Jogo iniciado com sucesso em {room_id}")
+        
+    except Exception as e:
+        logger.exception(f"❌ Erro ao iniciar jogo seguro em {room_id}: {e}")
+        room["game_active"] = False
+        await broadcast(room_id, {
+            "type": "error",
+            "message": f"Erro ao iniciar jogo: {str(e)[:100]}"
+        })
+
+
 async def game_loop(room_id: str):
     """Loop principal do jogo - Gera o caso pelo MOTOR MESTRE (Groq) e gerencia os turnos"""
-    print(f"\n{'='*60}")
-    print(f"🎮 game_loop INICIADO para sala {room_id}")
-    print(f"{'='*60}\n")
+    logger.info(f"\n{'='*60}")
+    logger.info(f"🎮 game_loop INICIADO para sala {room_id}")
+    logger.info(f"{'='*60}\n")
     
     room = ROOMS.get(room_id)
     if not room:
-        print(f"❌ Sala {room_id} não encontrada no game_loop")
+        logger.error(f"❌ Sala {room_id} não encontrada no game_loop")
         return
     
     participantes = room.get("players", [])
     num_jogadores = len(participantes)
-    print(f"👥 Número de participantes: {num_jogadores}")
+    logger.info(f"👥 Número de participantes: {num_jogadores}")
+    
+    if num_jogadores < 3:
+        logger.error(f"❌ Número insuficiente de jogadores: {num_jogadores} (mínimo: 3)")
+        room["game_active"] = False
+        await broadcast(room_id, {
+            "type": "error",
+            "message": f"Número insuficiente de jogadores: {num_jogadores} (mínimo: 3)"
+        })
+        return
     
     room["game_active"] = True
-    print(f"✅ Jogo ativado para sala {room_id}\n")
+    logger.info(f"✅ Jogo ativado para sala {room_id}\n")
     
     # 🎯 PASSO 1: Randomizar o assassino
     import random
@@ -1827,18 +1870,40 @@ async def game_loop(room_id: str):
     print(f"📤 Enviando caso para jogadores (case_id: {case_data.get('case_id')})")
     print(f"   Tipo: {type(case_data)}, Keys: {list(case_data.keys())[:5] if isinstance(case_data, dict) else 'N/A'}...")
 
-    # Enviar para todos com o campo 'content' e 'case' padronizados
-    # IMPORTANTE: Envia como objeto para o handler "game_start" no frontend
-    await broadcast(room_id, {
-        "type": "game_start",
-        "payload": {
-            "msg": "O mistério começou!",
-            "case": case_data  # O React vai ler isso aqui - deve ser um objeto, não string
-        }
-    })
+    # ✅ CORREÇÃO: Garantir que case_data seja um dict Python antes de enviar
+    if not isinstance(case_data, dict):
+        logger.error(f"❌ case_data não é dict antes de game_start, tipo: {type(case_data)}")
+        if isinstance(case_data, str):
+            try:
+                case_data = json.loads(case_data)
+            except:
+                case_data = {"descricao": case_data[:500]}
+        else:
+            case_data = {"descricao": str(case_data)[:500]}
     
-    # Log para debug
-    print(f"📤 Mensagem 'game_start' enviada (tipo: game_start, payload.case: objeto)")
+    # ✅ CORREÇÃO: Enviar game_start com dados estruturados e completos
+    game_start_payload = {
+        "type": "game_start",
+        "status": "game_started",
+        "case": case_data,  # ✅ Dict Python, não string JSON
+        "players": [
+            {
+                "id": str(p.get("id") or p.get("name", "")),
+                "nickname": p.get("name", "Jogador"),
+                "is_alive": p.get("status") != "dead",
+                "is_bot": p.get("isBot", False) or p.get("is_bot", False)
+            }
+            for p in participantes if isinstance(p, dict)
+        ],
+        "current_turn_player_id": str(get_current_turn(room_id) or ""),
+        "game_duration_minutes": 120,
+        "timestamp": time.time()
+    }
+    
+    logger.info(f"📤 Enviando game_start para {len(participantes)} jogadores em {room_id}")
+    await broadcast(room_id, game_start_payload)
+    
+    logger.info(f"✅ Mensagem 'game_start' enviada com sucesso (case_id: {case_data.get('case_id', 'N/A')})")
 
     # 2. Inicia a sequência de turnos com controle de tempo
     import time
@@ -1902,16 +1967,20 @@ async def game_loop(room_id: str):
             elapsed_time = time.time() - game_start_time
             game_time_remaining = max(0, game_max_duration - elapsed_time)
             
+            # ✅ CORREÇÃO: Enviar turn_start com dados estruturados
             await broadcast(room_id, {
                 "type": "turn_start",
+                "turnoAtual": str(player_identifier),  # Sempre string para consistência
                 "player": player_name,
-                "player_id": player_id,
-                "player_identifier": player_identifier,  # ID usado no game_state
+                "player_name": player_name,
+                "player_id": str(player_id),
+                "player_identifier": str(player_identifier),  # ID usado no game_state
                 "turn_index": idx,
                 "time_limit": turn_timeout,  # 1 minuto por turno
                 "game_time_remaining": int(game_time_remaining),  # Tempo restante do jogo em segundos
                 "game_elapsed_time": int(elapsed_time),  # Tempo decorrido em segundos
                 "can_end_game": can_end_game,  # Se já passou o tempo mínimo
+                "is_bot": is_bot,
                 "is_killer": is_killer  # Frontend filtra e mostra apenas para o próprio jogador
             })
             
@@ -1920,6 +1989,12 @@ async def game_loop(room_id: str):
                 "type": "turno",
                 "player_id": str(player_identifier)  # Sempre string para consistência
             })
+            
+            # ✅ Se for bot, processa turno automaticamente após 1 segundo
+            if is_bot:
+                await asyncio.sleep(1)
+                # Processa turno do bot (gera resposta, etc)
+                await process_bot_turn(room_id)
             
             # Se for bot assassino, pode decidir matar
             if is_bot and is_killer:
@@ -2158,21 +2233,59 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 
                 if msg_type == "start":
                     logger.info(f"📨 Recebido 'start' de {player_identifier} na sala {room_id}. Iniciando game_loop process.")
-                    # Lógica de início manual
+                    
+                    # ✅ Valida que a sala existe
+                    if room_id not in ROOMS:
+                        await websocket.send_json({
+                            "type": "error",
+                            "message": "Sala não encontrada"
+                        })
+                        continue
+                    
                     # Recebe a lista de jogadores (incluindo bots) do frontend
                     players_data = data.get("players", [])
                     if players_data:
                         room["players"] = players_data
-                        print(f"🎮 Jogadores recebidos: {len(players_data)} ({sum(1 for p in players_data if p.get('isBot')) } bots)")
+                        logger.info(f"🎮 Jogadores recebidos: {len(players_data)} ({sum(1 for p in players_data if p.get('isBot')) } bots)")
                     
                     num_atual = len(room.get("players", []))
-                    if num_atual >= 3:  # Mudado de 6 para 3
-                        asyncio.create_task(game_loop(room_id))
-                    else:
-                        await websocket.send_text(json.dumps({
+                    
+                    # ✅ CORREÇÃO: Validar número mínimo de jogadores
+                    if num_atual < 3:
+                        await websocket.send_json({
                             "type": "error", 
-                            "msg": f"Mínimo de 3 jogadores necessário. Atual: {num_atual}"
-                        }))
+                            "message": f"Mínimo de 3 jogadores necessário. Atual: {num_atual}"
+                        })
+                        continue
+                    
+                    # ✅ CORREÇÃO: Enviar confirmação ANTES de iniciar
+                    await websocket.send_json({
+                        "type": "game_starting",
+                        "message": "Jogo iniciando em 2 segundos...",
+                        "status": "preparing"
+                    })
+                    
+                    # Notifica todos os jogadores
+                    await broadcast(room_id, {
+                        "type": "game_starting",
+                        "message": f"🎮 {player_identifier} iniciou o jogo! Preparando...",
+                        "status": "preparing"
+                    })
+                    
+                    # Aguardar 2 segundos para garantir que frontend recebeu
+                    await asyncio.sleep(2)
+                    
+                    # ✅ AGORA iniciar o jogo
+                    try:
+                        logger.info(f"🎮 Iniciando game_loop para sala {room_id}")
+                        asyncio.create_task(game_loop(room_id))
+                        logger.info(f"✅ Task game_loop criada com sucesso para sala {room_id}")
+                    except Exception as e:
+                        logger.exception(f"❌ Erro crítico ao iniciar game_loop para sala {room_id}: {e}")
+                        await broadcast(room_id, {
+                            "type": "error",
+                            "message": f"Erro interno ao iniciar jogo: {str(e)[:100]}"
+                        })
                 
                 elif msg_type == "kill_player":
                     # Ação de assassinar um jogador
