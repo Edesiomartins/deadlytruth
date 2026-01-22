@@ -1189,11 +1189,11 @@ async def send_private_message(room_id: str, player_id: str, message: dict):
 
 def generate_clue_from_murder(victim_name: str, victim_info: dict, case_context: dict) -> str:
     """
-    Gera uma pista após um assassinato usando Groq.
+    Gera uma pista após um assassinato usando o provedor configurado (Groq, DeepSeek ou OpenRouter).
     Analisa a morte e gera uma pista contextual.
     """
     try:
-        groq_client = get_groq_case_client()
+        provider = os.getenv("AI_PROVIDER", "groq").lower()
         
         prompt = f"""Você é o Mestre do Jogo 'Deadly Truth'. Um assassinato acabou de ocorrer.
 
@@ -1212,13 +1212,39 @@ Exemplo: "Pista encontrada: Fragmentos de tecido vermelho foram encontrados pert
 
 Responda APENAS com a pista, sem explicações adicionais:"""
         
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": SYSTEM_GAME_MASTER},
-                {"role": "user", "content": prompt}
-            ]
-        )
+        if provider == "openrouter":
+            client = get_openrouter_client()
+            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": SYSTEM_GAME_MASTER},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,
+                max_tokens=500
+            )
+        elif provider == "deepseek":
+            client = get_deepseek_client()
+            response = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": SYSTEM_GAME_MASTER},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.8,
+                max_tokens=500
+            )
+        else:
+            # Groq (padrão)
+            client = get_groq_case_client()
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {"role": "system", "content": SYSTEM_GAME_MASTER},
+                    {"role": "user", "content": prompt}
+                ]
+            )
         
         clue = response.choices[0].message.content.strip()
         # Limpa a resposta
