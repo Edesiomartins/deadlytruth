@@ -18,11 +18,40 @@ export default function Game() {
     const [gameActive, setGameActive] = useState(false);
     const [gameState, setGameState] = useState("lobby");
     const [systemMessage, setSystemMessage] = useState("");
+    const [loading, setLoading] = useState(true);
+    const [currentPlayerName, setCurrentPlayerName] = useState(null);
+    const [turnTimeRemaining, setTurnTimeRemaining] = useState(60);
+    const [gameTimeRemaining, setGameTimeRemaining] = useState(7200);
+    const [gameElapsedTime, setGameElapsedTime] = useState(0);
+    const [canEndGame, setCanEndGame] = useState(false);
+    const [playerStatus, setPlayerStatus] = useState("alive");
+    
+    const messagesEndRef = useRef(null);
+    const turnTimerRef = useRef(null);
+    const gameTimerRef = useRef(null);
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    };
+
+    useEffect(() => {
+        return () => {
+            if (turnTimerRef.current) {
+                clearInterval(turnTimerRef.current);
+            }
+            if (gameTimerRef.current) {
+                clearInterval(gameTimerRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [messages]);
     
     // ✅ CONECTAR AO WEBSOCKET
     useEffect(() => {
         const token = localStorage.getItem("jwt_token") || localStorage.getItem("token");
-        const playerName = localStorage.getItem("playerName");
         
         if (!token) {
             navigate("/login");
@@ -37,6 +66,7 @@ export default function Game() {
         
         ws.current.onopen = () => {
             console.log("✅ WebSocket conectado");
+            setLoading(false);
         };
         
         ws.current.onmessage = (event) => {
@@ -121,6 +151,36 @@ export default function Game() {
                     console.warn("⚠️ turnoAtual está vazio!");
                 }
                 
+                setCurrentPlayerName(message.player_name || message.player || "Jogador");
+                
+                if (message.time_limit) {
+                    setTurnTimeRemaining(message.time_limit);
+                }
+                if (message.game_time_remaining !== undefined) {
+                    setGameTimeRemaining(message.game_time_remaining);
+                }
+                if (message.game_elapsed_time !== undefined) {
+                    setGameElapsedTime(message.game_elapsed_time);
+                }
+                if (message.can_end_game !== undefined) {
+                    setCanEndGame(message.can_end_game);
+                }
+                
+                // Inicia contador do turno
+                if (turnTimerRef.current) {
+                    clearInterval(turnTimerRef.current);
+                }
+                let turnTime = message.time_limit || 60;
+                turnTimerRef.current = setInterval(() => {
+                    setTurnTimeRemaining(prev => {
+                        const newTime = Math.max(0, prev - 1);
+                        if (newTime === 0) {
+                            clearInterval(turnTimerRef.current);
+                        }
+                        return newTime;
+                    });
+                }, 1000);
+                
                 setSystemMessage(`🎯 Turno de ${message.player_name || message.player || "Jogador"}`);
                 break;
             
@@ -137,9 +197,11 @@ export default function Game() {
             case "chat":
                 console.log("💬 Mensagem:", message.player || message.player_id, message.message || message.content);
                 setMessages(prev => [...prev, {
+                    id: Date.now(),
                     player: message.player || message.player_id || "Jogador",
-                    message: message.message || message.content || "",
-                    dead: message.dead || false
+                    text: message.message || message.content || "",
+                    dead: message.dead || false,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                 }]);
                 break;
             
@@ -147,9 +209,12 @@ export default function Game() {
                 console.log("🔍 Pista:", message.text);
                 setPistas(prev => [...prev, message.text]);
                 setMessages(prev => [...prev, {
+                    id: Date.now(),
                     player: "🧠 MESTRE",
-                    message: message.text,
-                    dead: false
+                    text: message.text,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                 }]);
                 break;
             
@@ -202,6 +267,21 @@ export default function Game() {
                         ? { ...p, status: "dead" } 
                         : p
                 ));
+                break;
+            
+            case "time_update":
+                if (message.turn_time_remaining !== undefined) {
+                    setTurnTimeRemaining(message.turn_time_remaining);
+                }
+                if (message.game_time_remaining !== undefined) {
+                    setGameTimeRemaining(message.game_time_remaining);
+                }
+                if (message.game_elapsed_time !== undefined) {
+                    setGameElapsedTime(message.game_elapsed_time);
+                }
+                if (message.can_end_game !== undefined) {
+                    setCanEndGame(message.can_end_game);
+                }
                 break;
             
             case "error":
@@ -258,170 +338,287 @@ export default function Game() {
         setMessageInput("");
         console.log("✅ Mensagem enviada");
     };
+
+    const handleLeave = () => {
+        if (ws.current) ws.current.close();
+        navigate("/lobby");
+    };
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-charcoalBlack flex items-center justify-center">
+                <div className="text-center">
+                    <div className="animate-spin h-16 w-16 border-4 border-accentRed border-t-transparent rounded-full mx-auto mb-4"></div>
+                    <p className="text-accentRed font-cinzel text-xl">Conectando ao jogo...</p>
+                </div>
+            </div>
+        );
+    }
     
     // ✅ RENDERIZAR
     return (
-        <div className="game-container" style={{ minHeight: "100vh", backgroundColor: "#1a1a1a", color: "#fff", padding: "20px" }}>
-            <div className="game-header" style={{ marginBottom: "20px", borderBottom: "2px solid #dc143c", paddingBottom: "10px" }}>
-                <h1 style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "10px" }}>🎮 Deadly Truth</h1>
-                <p style={{ fontSize: "14px", color: "#ccc" }}>Sala: {roomId}</p>
-                <p style={{ fontSize: "12px", color: "#888" }}>
-                    Seu ID: {myPlayerId || "Carregando..."} | Seu turno? {isMyTurn ? "✅ SIM" : "❌ NÃO"}
-                </p>
-            </div>
+        <div className="min-h-screen bg-charcoalBlack relative overflow-hidden">
+            {/* Background Effect */}
+            <div className="absolute inset-0 bg-gradient-to-br from-primaryRed/20 via-charcoalBlack to-accentRed/10"></div>
             
-            <div className="game-content" style={{ display: "grid", gridTemplateColumns: "300px 1fr 250px", gap: "20px" }}>
-                {/* CASO E PISTAS */}
-                <div className="left-panel" style={{ backgroundColor: "#2a2a2a", padding: "15px", borderRadius: "8px", maxHeight: "80vh", overflowY: "auto" }}>
-                    <h2 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "15px", color: "#dc143c" }}>📋 Caso</h2>
-                    {caso ? (
-                        <div className="caso-content" style={{ marginBottom: "20px" }}>
-                            <p><strong>Cenário:</strong> {caso.cenario || "N/A"}</p>
-                            <p><strong>Descrição:</strong> {caso.descricao || "N/A"}</p>
-                            <p><strong>Local:</strong> {caso.local_corpo || "N/A"}</p>
-                            <p><strong>Arma:</strong> {caso.arma_crime || "N/A"}</p>
-                            {caso.historia && <p><strong>História:</strong> {caso.historia}</p>}
-                            {caso.suspeitos && caso.suspeitos.length > 0 && (
-                                <p><strong>Suspeitos:</strong> {caso.suspeitos.join(", ")}</p>
-                            )}
+            {/* Animated Grid */}
+            <div className="absolute inset-0 opacity-10">
+                <div className="absolute inset-0" style={{
+                    backgroundImage: `linear-gradient(rgba(220, 20, 60, 0.1) 1px, transparent 1px),
+                                   linear-gradient(90deg, rgba(220, 20, 60, 0.1) 1px, transparent 1px)`,
+                    backgroundSize: '50px 50px'
+                }}></div>
+            </div>
+
+            {/* Header */}
+            <div className="relative z-10 border-b border-accentRed/30 backdrop-blur-xl bg-darkGray/60">
+                <div className="px-6 py-4">
+                    <div className="flex items-center justify-between">
+                        <div className="flex-1">
+                            <h1 className="text-xl font-bold text-white tracking-wide font-cinzel">
+                                {caso?.case_id || "DEADLY TRUTH"}
+                            </h1>
+                            <div className="flex items-center gap-3 mt-1 flex-wrap">
+                                <p className="text-xs text-accentRed/70 tracking-wider font-roboto">
+                                    {ws.current?.readyState === WebSocket.OPEN ? "🔴 Ao vivo" : "⚫ Desconectado"}
+                                </p>
+                                {currentPlayerName && (
+                                    <>
+                                        <span className="text-xs text-mediumGray">•</span>
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-2 h-2 rounded-full bg-accentRed animate-pulse"></div>
+                                            <p className="text-xs text-accentRed font-medium font-roboto">
+                                                Vez de: <span className="text-white">{currentPlayerName}</span>
+                                            </p>
+                                            {turnTimeRemaining > 0 && (
+                                                <span className={`text-xs font-bold font-roboto ${
+                                                    turnTimeRemaining <= 10 ? 'text-red-400 animate-pulse' : 
+                                                    turnTimeRemaining <= 30 ? 'text-yellow-400' : 'text-green-400'
+                                                }`}>
+                                                    ⏱️ {Math.floor(turnTimeRemaining / 60)}:{(turnTimeRemaining % 60).toString().padStart(2, '0')}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </>
+                                )}
+                                <span className="text-xs text-mediumGray">•</span>
+                                <div className="flex items-center gap-2">
+                                    <p className="text-xs text-offWhite/70 font-roboto">
+                                        🕐 {Math.floor(gameElapsedTime / 60)}:{(gameElapsedTime % 60).toString().padStart(2, '0')} / {Math.floor(gameTimeRemaining / 60)}:{(gameTimeRemaining % 60).toString().padStart(2, '0')} restante
+                                    </p>
+                                    {!canEndGame && (
+                                        <span className="text-xs text-yellow-400 font-roboto">
+                                            (Mín: 30min)
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
                         </div>
-                    ) : (
-                        <p style={{ color: "#888" }}>Aguardando caso...</p>
+                        
+                        <button 
+                            onClick={handleLeave}
+                            className="px-4 py-2 bg-primaryRed/20 hover:bg-accentRed/30 border border-accentRed/30 rounded-lg text-accentRed text-sm font-medium tracking-wide transition-all font-roboto"
+                        >
+                            Sair da Partida
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Main Content */}
+            <div className="relative z-10 h-[calc(100vh-73px)] flex">
+                {/* Left Panel - Case Info */}
+                <div className="w-96 border-r border-accentRed/30 backdrop-blur-xl bg-darkGray/40 flex flex-col overflow-y-auto">
+                    <div className="px-4 py-3 border-b border-accentRed/30">
+                        <h2 className="text-xs tracking-widest text-accentRed/70 uppercase font-light font-roboto">
+                            O Caso
+                        </h2>
+                    </div>
+                    
+                    {/* Exibe caso recebido via mensagem tipo "caso" */}
+                    {caso && (
+                        <div className="p-4 space-y-3 border-b border-accentRed/30">
+                            <h2 className="text-lg font-bold text-accentRed font-cinzel">🗂️ Caso #{caso.case_id}</h2>
+                            <div className="space-y-2 text-sm font-roboto">
+                                <p><strong className="text-white">Nível:</strong> <span className="text-offWhite/80">{caso.nivel}</span></p>
+                                <p><strong className="text-white">Cenário:</strong> <span className="text-offWhite/80">{caso.cenario}</span></p>
+                                {caso.descricao && (
+                                    <div>
+                                        <p className="text-white font-semibold mb-1">Descrição:</p>
+                                        <p className="text-offWhite/80 leading-relaxed">{caso.descricao}</p>
+                                    </div>
+                                )}
+                                {caso.historia && (
+                                    <div>
+                                        <p className="text-white font-semibold mb-1">História:</p>
+                                        <p className="text-offWhite/80 leading-relaxed">{caso.historia}</p>
+                                    </div>
+                                )}
+                                {caso.suspeitos && caso.suspeitos.length > 0 && (
+                                    <p><strong className="text-white">Suspeitos:</strong> <span className="text-offWhite/80">{caso.suspeitos.join(", ")}</span></p>
+                                )}
+                            </div>
+                        </div>
                     )}
                     
-                    <h3 style={{ fontSize: "16px", fontWeight: "bold", marginTop: "20px", marginBottom: "10px", color: "#dc143c" }}>🔍 Pistas</h3>
-                    <div className="pistas-list" style={{ maxHeight: "300px", overflowY: "auto" }}>
-                        {pistas.length > 0 ? (
-                            pistas.map((pista, idx) => (
-                                <div key={idx} className="pista-item" style={{ padding: "8px", marginBottom: "8px", backgroundColor: "#333", borderRadius: "4px", fontSize: "12px" }}>
-                                    {pista}
-                                </div>
-                            ))
-                        ) : (
-                            <p style={{ color: "#888", fontSize: "12px" }}>Nenhuma pista ainda...</p>
-                        )}
+                    {/* Exibe pistas descobertas */}
+                    {pistas.length > 0 && (
+                        <div className="p-4 border-b border-accentRed/30">
+                            <h3 className="text-sm font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-3">
+                                🧩 Pistas Descobertas
+                            </h3>
+                            <ul className="space-y-2 max-h-64 overflow-y-auto">
+                                {pistas.map((pista, index) => (
+                                    <li key={index} className="text-xs text-offWhite/80 font-roboto flex items-start gap-2">
+                                        <span className="text-accentRed mt-1">•</span>
+                                        <span>{pista}</span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    
+                    {!caso && (
+                        <div className="p-4 text-center text-lightGray/50">
+                            <p className="font-roboto">Aguardando o mestre gerar o caso...</p>
+                        </div>
+                    )}
+                    
+                    {/* Lista de Jogadores */}
+                    <div className="mt-auto border-t border-accentRed/30 p-4">
+                        {(() => {
+                            const alivePlayers = Array.isArray(players)
+                                ? players.filter(p => p.status === "alive" || !p.status)
+                                : [];
+                            
+                            const deadPlayers = Array.isArray(players)
+                                ? players.filter(p => p.status === "dead")
+                                : [];
+                            
+                            return (
+                                <>
+                                    {alivePlayers.length > 0 && (
+                                        <div className="mb-4">
+                                            <h3 className="text-xs font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-2">
+                                                🎮 Jogadores
+                                            </h3>
+                                            <ul className="space-y-1">
+                                                {alivePlayers.map((p, idx) => (
+                                                    <li key={idx} className={`text-xs text-offWhite/80 font-roboto flex items-center gap-2 ${
+                                                        (p.id === currentTurnPlayerId || p.name === currentTurnPlayerId) ? 'text-accentRed font-bold' : ''
+                                                    }`}>
+                                                        <div className={`w-2 h-2 rounded-full ${
+                                                            (p.id === currentTurnPlayerId || p.name === currentTurnPlayerId) ? 'bg-accentRed animate-pulse' : 'bg-green-500'
+                                                        }`}></div>
+                                                        {p.nickname || p.name || p.id || `Jogador ${idx + 1}`}
+                                                        {(p.id === currentTurnPlayerId || p.name === currentTurnPlayerId) && <span>🎯</span>}
+                                                        {p.is_bot && <span>🤖</span>}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                    
+                                    {deadPlayers.length > 0 && (
+                                        <div>
+                                            <h3 className="text-xs font-bold text-gray-400/70 uppercase tracking-wider font-roboto mb-2">
+                                                👻 Espectadores
+                                            </h3>
+                                            <ul className="space-y-1">
+                                                {deadPlayers.map((p, idx) => (
+                                                    <li key={idx} className="text-xs text-gray-400/60 font-roboto flex items-center gap-2">
+                                                        <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+                                                        {p.nickname || p.name || p.id || `Jogador ${idx + 1}`}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                    )}
+                                </>
+                            );
+                        })()}
                     </div>
                 </div>
-                
-                {/* CHAT */}
-                <div className="middle-panel" style={{ display: "flex", flexDirection: "column", backgroundColor: "#2a2a2a", padding: "15px", borderRadius: "8px", maxHeight: "80vh" }}>
-                    <h2 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "15px", color: "#dc143c" }}>💬 Chat</h2>
-                    <div className="messages-container" style={{ flex: 1, overflowY: "auto", marginBottom: "15px", padding: "10px", backgroundColor: "#1a1a1a", borderRadius: "4px", minHeight: "400px" }}>
-                        {messages.length > 0 ? (
-                            messages.map((msg, idx) => (
-                                <div key={idx} className={`message ${msg.dead ? "dead" : ""}`} style={{ 
-                                    marginBottom: "10px", 
-                                    padding: "8px", 
-                                    backgroundColor: msg.dead ? "#333" : "#2a2a2a",
-                                    borderRadius: "4px",
-                                    opacity: msg.dead ? 0.6 : 1
-                                }}>
-                                    <strong style={{ color: msg.dead ? "#888" : "#dc143c" }}>{msg.player}:</strong> {msg.message}
-                                </div>
-                            ))
-                        ) : (
-                            <p style={{ color: "#888", textAlign: "center", marginTop: "50px" }}>Nenhuma mensagem ainda...</p>
-                        )}
+
+                {/* Right Panel - Chat */}
+                <div className="flex-1 flex flex-col backdrop-blur-xl bg-darkGray/20">
+                    <div className="px-4 py-3 border-b border-accentRed/30">
+                        <h2 className="text-xs tracking-widest text-accentRed/70 uppercase font-light font-roboto">
+                            Investigação
+                        </h2>
                     </div>
                     
-                    <div className="input-section" style={{ display: "flex", gap: "10px" }}>
-                        {isMyTurn ? (
-                            <>
-                                <input
-                                    type="text"
-                                    value={messageInput}
-                                    onChange={(e) => setMessageInput(e.target.value)}
-                                    onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
-                                    placeholder="Digite sua mensagem..."
-                                    disabled={false}
-                                    style={{ 
-                                        flex: 1, 
-                                        padding: "10px", 
-                                        backgroundColor: "#1a1a1a", 
-                                        border: "1px solid #dc143c", 
-                                        borderRadius: "4px", 
-                                        color: "#fff",
-                                        opacity: 1, 
-                                        cursor: "text" 
-                                    }}
-                                />
-                                <button 
-                                    onClick={handleSendMessage}
-                                    style={{ 
-                                        padding: "10px 20px", 
-                                        backgroundColor: "#dc143c", 
-                                        color: "#fff", 
-                                        border: "none", 
-                                        borderRadius: "4px", 
-                                        cursor: "pointer",
-                                        fontWeight: "bold"
-                                    }}
-                                >
-                                    Enviar
-                                </button>
-                            </>
-                        ) : (
-                            <>
-                                <input
-                                    type="text"
-                                    placeholder="Aguarde seu turno..."
-                                    disabled={true}
-                                    style={{ 
-                                        flex: 1, 
-                                        padding: "10px", 
-                                        backgroundColor: "#1a1a1a", 
-                                        border: "1px solid #555", 
-                                        borderRadius: "4px", 
-                                        color: "#888",
-                                        opacity: 0.5, 
-                                        cursor: "not-allowed" 
-                                    }}
-                                />
-                                <button 
-                                    disabled
-                                    style={{ 
-                                        padding: "10px 20px", 
-                                        backgroundColor: "#555", 
-                                        color: "#888", 
-                                        border: "none", 
-                                        borderRadius: "4px", 
-                                        cursor: "not-allowed"
-                                    }}
-                                >
-                                    Aguarde...
-                                </button>
-                            </>
-                        )}
+                    {/* Messages */}
+                    <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                        {messages.map((msg) => (
+                            <div key={msg.id} className={`${msg.system ? 'text-center' : ''}`}>
+                                {msg.system ? (
+                                    <div className="inline-block px-3 py-1 rounded-full bg-primaryRed/30 border border-accentRed/30">
+                                        <p className="text-xs text-accentRed/70 font-roboto">{msg.text}</p>
+                                    </div>
+                                ) : (
+                                    <div className={`bg-charcoalBlack/50 border rounded-lg p-3 ${msg.dead ? 'border-gray-600/50 opacity-70' : 'border-primaryRed/20'}`}>
+                                        <div className="flex items-baseline gap-2 mb-1">
+                                            <span className={`text-xs font-medium font-roboto ${msg.dead ? 'text-gray-400' : 'text-accentRed'}`}>
+                                                {msg.dead ? "👻 " : ""}{msg.player}
+                                            </span>
+                                            <span className="text-xs text-mediumGray font-roboto">{msg.time}</span>
+                                        </div>
+                                        <p className={`text-sm font-roboto ${msg.dead ? 'text-gray-400' : 'text-offWhite'}`}>{msg.text}</p>
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        <div ref={messagesEndRef} />
                     </div>
-                </div>
-                
-                {/* JOGADORES */}
-                <div className="right-panel" style={{ backgroundColor: "#2a2a2a", padding: "15px", borderRadius: "8px", maxHeight: "80vh", overflowY: "auto" }}>
-                    <h2 style={{ fontSize: "18px", fontWeight: "bold", marginBottom: "15px", color: "#dc143c" }}>👥 Jogadores</h2>
-                    <div className="players-list">
-                        {players.length > 0 ? (
-                            players.map((player) => (
-                                <div 
-                                    key={player.id || player.name} 
-                                    className={`player-item ${player.id === currentTurnPlayerId || player.name === currentTurnPlayerId ? "current-turn" : ""}`}
-                                    style={{ 
-                                        padding: "10px", 
-                                        marginBottom: "8px", 
-                                        backgroundColor: (player.id === currentTurnPlayerId || player.name === currentTurnPlayerId) ? "#dc143c20" : "#333", 
-                                        borderRadius: "4px",
-                                        border: (player.id === currentTurnPlayerId || player.name === currentTurnPlayerId) ? "2px solid #dc143c" : "1px solid #555"
-                                    }}
-                                >
-                                    <span style={{ color: player.status === "dead" ? "#888" : "#fff" }}>
-                                        {player.nickname || player.name || player.id}
-                                    </span>
-                                    {(player.id === currentTurnPlayerId || player.name === currentTurnPlayerId) && <span style={{ marginLeft: "5px" }}>🎯</span>}
-                                    {player.is_bot && <span style={{ marginLeft: "5px" }}>🤖</span>}
-                                    {player.status === "dead" && <span style={{ marginLeft: "5px" }}>💀</span>}
-                                </div>
-                            ))
+                    
+                    {/* Input */}
+                    <div className="p-4 border-t border-accentRed/30">
+                        {playerStatus === "dead" ? (
+                            <div className="px-3 py-4 bg-gray-800/50 border border-gray-600/50 rounded-lg text-center">
+                                <p className="text-sm text-gray-400 font-roboto mb-1">
+                                    👻 Você está morto
+                                </p>
+                                <p className="text-xs text-gray-500 font-roboto">
+                                    Observando o jogo...
+                                </p>
+                            </div>
                         ) : (
-                            <p style={{ color: "#888", fontSize: "12px" }}>Nenhum jogador ainda...</p>
+                            <>
+                                {(() => {
+                                    const meuID = localStorage.getItem("player_id") || myPlayerId || "Você";
+                                    const naoEhMinhaVez = currentTurnPlayerId && currentTurnPlayerId !== meuID && String(currentTurnPlayerId) !== String(meuID);
+                                    
+                                    return naoEhMinhaVez && currentPlayerName && (
+                                        <div className="mb-2 px-3 py-2 bg-accentRed/20 border border-accentRed/30 rounded-lg">
+                                            <p className="text-xs text-accentRed/80 font-roboto text-center">
+                                                ⏳ Aguarde sua vez. É a vez de <span className="font-bold text-accentRed">{currentPlayerName}</span>
+                                            </p>
+                                        </div>
+                                    );
+                                })()}
+                                <div className="flex gap-2">
+                                    <input
+                                        type="text"
+                                        value={messageInput}
+                                        onChange={(e) => setMessageInput(e.target.value)}
+                                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                                        placeholder={isMyTurn ? "Digite sua mensagem..." : "Aguarde sua vez..."}
+                                        className="flex-1 px-3 py-2 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto disabled:opacity-50 disabled:cursor-not-allowed"
+                                        disabled={!isMyTurn || ws.current?.readyState !== WebSocket.OPEN}
+                                    />
+                                    <button
+                                        onClick={handleSendMessage}
+                                        disabled={!isMyTurn || ws.current?.readyState !== WebSocket.OPEN}
+                                        className="px-4 py-2 bg-primaryRed hover:bg-accentRed rounded-lg text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={!isMyTurn ? "Aguarde sua vez" : "Enviar mensagem"}
+                                    >
+                                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                                        </svg>
+                                    </button>
+                                </div>
+                            </>
                         )}
                     </div>
                 </div>
@@ -429,18 +626,7 @@ export default function Game() {
             
             {/* MENSAGEM DO SISTEMA */}
             {systemMessage && (
-                <div className="system-message" style={{ 
-                    position: "fixed", 
-                    bottom: "20px", 
-                    left: "50%", 
-                    transform: "translateX(-50%)", 
-                    padding: "15px 30px", 
-                    backgroundColor: "#dc143c", 
-                    color: "#fff", 
-                    borderRadius: "8px",
-                    zIndex: 1000,
-                    boxShadow: "0 4px 6px rgba(0,0,0,0.3)"
-                }}>
+                <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-accentRed text-white rounded-lg shadow-lg z-50 font-roboto">
                     {systemMessage}
                 </div>
             )}
