@@ -618,7 +618,7 @@ export default function Game() {
           )}
           
           {/* Fallback: Exibe gameCase se caso não estiver disponível */}
-          {!caso && gameCase && (
+          {!caso && gameCase ? (
             <div className="p-4 space-y-4">
               {/* Garante que gameCase seja um objeto */}
               {(() => {
@@ -705,11 +705,11 @@ export default function Game() {
                 </div>
               )}
             </div>
-          ) : (
+          ) : !caso ? (
             <div className="p-4 text-center text-lightGray/50">
               <p className="font-roboto">Aguardando o mestre gerar o caso...</p>
             </div>
-          )}
+          ) : null}
           
           {/* Lista de Jogadores */}
           <div className="mt-auto border-t border-accentRed/30 p-4">
