@@ -304,20 +304,6 @@ export default function Game() {
                 }
                 break;
             
-            case "player_death":
-                const victimName = message.victim || message.player_name || "Jogador";
-                setSystemMessage(`💀 ${victimName} foi encontrado morto!`);
-                if (message.clue) {
-                    setPistas(prev => [...prev, message.clue]);
-                }
-                // Atualiza lista de jogadores
-                setPlayers(prev => prev.map(p => 
-                    (p.name === victimName || p.id === victimName || p.nickname === victimName) 
-                        ? { ...p, status: "dead" } 
-                        : p
-                ));
-                break;
-            
             case "time_update":
                 if (message.turn_time_remaining !== undefined) {
                     setTurnTimeRemaining(message.turn_time_remaining);
