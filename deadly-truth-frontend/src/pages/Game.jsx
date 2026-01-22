@@ -26,6 +26,12 @@ export default function Game() {
     const [canEndGame, setCanEndGame] = useState(false);
     const [playerStatus, setPlayerStatus] = useState("alive");
     
+    // ✅ NOVOS ESTADOS PARA O SISTEMA DE ASSASSINATO
+    const [isKiller, setIsKiller] = useState(false);
+    const [selectedTarget, setSelectedTarget] = useState(null);
+    const [showKillModal, setShowKillModal] = useState(false);
+    const [alivePlayersForKill, setAlivePlayersForKill] = useState([]);
+    
     const messagesEndRef = useRef(null);
     const turnTimerRef = useRef(null);
     const gameTimerRef = useRef(null);
@@ -244,7 +250,43 @@ export default function Game() {
             
             case "you_are_killer":
                 console.log("🔪 Você é o assassino!");
-                setSystemMessage("🔪 VOCÊ É O ASSASSINO!");
+                setIsKiller(true); // ✅ ATUALIZA ESTADO isKiller
+                setSystemMessage("🔪 VOCÊ É O ASSASSINO! Mate seus inimigos sem ser descoberto.");
+                // Atualiza lista de alvos vivos
+                const allPlayers = players.length > 0 ? players : (message.players || []);
+                const alive = allPlayers.filter(p => 
+                    p.is_alive && String(p.id) !== String(myPlayerId)
+                );
+                setAlivePlayersForKill(alive);
+                break;
+            
+            case "player_death": // ✅ NOVO: TRATAR MORTE DE JOGADOR
+                console.log("💀 Jogador morto:", message.victim_name || message.victim);
+                const victimName = message.victim_name || message.victim || "Jogador";
+                setMessages(prev => [...prev, {
+                    id: Date.now(),
+                    player: "SISTEMA",
+                    text: `💀 ${victimName} foi encontrado morto!`,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                // Atualizar o estado dos jogadores para refletir a morte
+                setPlayers(prev => prev.map(p => 
+                    String(p.id) === String(message.victim_id) || p.name === victimName || p.nickname === victimName
+                        ? { ...p, is_alive: false, status: "dead" } 
+                        : p
+                ));
+                // Se for assassino, atualizar lista de alvos
+                if (isKiller) {
+                    setAlivePlayersForKill(prev => prev.filter(p => 
+                        String(p.id) !== String(message.victim_id) && p.name !== victimName && p.nickname !== victimName
+                    ));
+                }
+                // Adiciona pista se houver
+                if (message.clue) {
+                    setPistas(prev => [...prev, message.clue]);
+                }
                 break;
             
             case "players_update":
@@ -252,6 +294,13 @@ export default function Game() {
                 console.log("👥 Jogadores atualizados:", message.players);
                 if (Array.isArray(message.players)) {
                     setPlayers(message.players);
+                    // ✅ ATUALIZAR LISTA DE ALVOS SE FOR ASSASSINO
+                    if (isKiller) {
+                        const alive = message.players.filter(p => 
+                            p.is_alive && String(p.id) !== String(myPlayerId)
+                        );
+                        setAlivePlayersForKill(alive);
+                    }
                 }
                 break;
             
@@ -342,6 +391,44 @@ export default function Game() {
     const handleLeave = () => {
         if (ws.current) ws.current.close();
         navigate("/lobby");
+    };
+
+    // ✅ FUNÇÃO PARA INICIAR PROCESSO DE MATAR
+    const handleKill = (targetId) => {
+        console.log("🔪 Tentando matar:", targetId);
+        
+        if (!isKiller) {
+            setSystemMessage("❌ Você não é o assassino!");
+            return;
+        }
+        
+        if (!isMyTurn) {
+            setSystemMessage("❌ Não é sua vez!");
+            return;
+        }
+        
+        setSelectedTarget(targetId);
+        setShowKillModal(true); // Abre o modal de confirmação
+    };
+
+    // ✅ FUNÇÃO PARA CONFIRMAR A MORTE
+    const confirmKill = () => {
+        console.log("🔪 Confirmando morte de:", selectedTarget);
+        
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+            setSystemMessage("❌ Não conectado ao servidor");
+            return;
+        }
+        
+        ws.current.send(JSON.stringify({
+            type: "kill",
+            target_id: selectedTarget,
+            player_id: myPlayerId // O assassino
+        }));
+        
+        setShowKillModal(false); // Fecha o modal
+        setSelectedTarget(null);
+        setSystemMessage("🔪 Você matou um jogador!");
     };
 
     if (loading) {
@@ -628,6 +715,48 @@ export default function Game() {
             {systemMessage && (
                 <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 px-6 py-3 bg-accentRed text-white rounded-lg shadow-lg z-50 font-roboto">
                     {systemMessage}
+                </div>
+            )}
+
+            {/* ✅ MODAL DE CONFIRMAÇÃO DE MORTE */}
+            {showKillModal && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+                    <div className="bg-darkGray border-2 border-accentRed rounded-lg p-6 max-w-md w-full mx-4">
+                        <h2 className="text-xl font-bold text-accentRed font-cinzel mb-4">
+                            ⚠️ Confirmar Morte
+                        </h2>
+                        {(() => {
+                            const target = players.find(p => String(p.id) === String(selectedTarget));
+                            return (
+                                <>
+                                    <p className="text-offWhite font-roboto mb-2">
+                                        Você tem certeza que quer matar <strong className="text-accentRed">{target?.nickname || target?.name || "este jogador"}</strong>?
+                                    </p>
+                                    <p className="text-yellow-400 font-roboto text-sm mb-4">
+                                        ⚠️ Esta ação é irreversível!
+                                    </p>
+                                    
+                                    <div className="flex gap-3">
+                                        <button 
+                                            onClick={confirmKill}
+                                            className="flex-1 px-4 py-2 bg-accentRed hover:bg-red-600 text-white rounded-lg font-medium transition-colors font-roboto"
+                                        >
+                                            ✅ Confirmar
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setShowKillModal(false);
+                                                setSelectedTarget(null);
+                                            }}
+                                            className="flex-1 px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-medium transition-colors font-roboto"
+                                        >
+                                            ❌ Cancelar
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
                 </div>
             )}
         </div>
