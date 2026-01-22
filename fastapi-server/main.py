@@ -7,6 +7,7 @@ import random
 import time
 from pathlib import Path
 from datetime import datetime
+import httpx  # pyright: ignore[reportMissingImports]
 from groq import Groq  # pyright: ignore[reportMissingImports]
 from openai import OpenAI  # pyright: ignore[reportMissingImports]
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response, status  # pyright: ignore[reportMissingImports]
@@ -686,42 +687,69 @@ CONVERSA RECENTE:
 
 É sua vez de falar. Como {bot_name}, analise as evidências disponíveis e faça uma observação, pergunta ou análise relevante como um jogador humano tentando descobrir o culpado (máx 2-3 frases):"""
     
-    # Gera resposta usando DeepSeek (motor para interação de bots)
+    # Gera resposta usando OpenRouter via httpx (GRATUITO)
     try:
-        deepseek_client = get_deepseek_client()
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        if not openrouter_api_key:
+            logger.warning(f"⚠️ OPENROUTER_API_KEY não encontrada, usando fallback para bot {bot_name}")
+            return generate_bot_response_fallback(bot_name, context)
         
-        messages = []
-        if system_prompt:
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": user_prompt})
+        # Monta o prompt completo combinando system e user
+        full_context = f"{system_prompt}\n\n{user_prompt}"
         
-        response = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
-            messages=messages,
-            temperature=0.8,  # Um pouco mais criativo para respostas naturais
-            max_tokens=150  # Limita para respostas curtas
-        )
-        
-        bot_response = response.choices[0].message.content.strip()
-        # Limpa a resposta (remove aspas extras, etc)
-        bot_response = bot_response.strip().strip('"\'')
-        return bot_response
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openrouter_api_key}",
+                    "HTTP-Referer": "https://deadlytruth.app",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "deepseek/deepseek-chat",  # ✅ GRATUITO no OpenRouter
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": full_context
+                        }
+                    ],
+                    "temperature": 0.8,
+                    "max_tokens": 150
+                },
+                timeout=10.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                bot_response = data["choices"][0]["message"]["content"].strip()
+                # Limpa a resposta (remove aspas extras, etc)
+                bot_response = bot_response.strip().strip('"\'')
+                logger.info(f"✅ Bot {bot_name} respondeu via OpenRouter")
+                return bot_response
+            else:
+                logger.warning(f"⚠️ OpenRouter erro {response.status_code}: {response.text}")
+                return generate_bot_response_fallback(bot_name, context)
+                
     except Exception as e:
-        print(f"❌ Erro ao gerar resposta do bot {bot_name} com DeepSeek: {e}")
-        # Fallback: resposta genérica baseada na personalidade
-        fallbacks = {
-            "Shadow_Hunter": "Hmm... preciso investigar isso mais a fundo.",
-            "Night_Stalker": "...",
-            "Dark_Phoenix": "Eu... eu não sei o que dizer...",
-            "Silent_Reaper": "Irrelevante.",
-            "Ghost_Whisper": "Ah, isso é interessante...",
-            "Blood_Moon": "Isso não pode ser coincidência!",
-            "Crimson_Blade": "Vamos ao ponto.",
-            "Phantom_Eyes": "Deixe-me refletir sobre isso.",
-            "Raven_Soul": "Sinto uma energia estranha aqui...",
-            "Death_Dealer": "Já vi isso antes."
-        }
-        return fallbacks.get(bot_name, "Sem comentários.")
+        logger.warning(f"⚠️ OpenRouter falhou para bot {bot_name}: {e}")
+        return generate_bot_response_fallback(bot_name, context)
+
+
+def generate_bot_response_fallback(bot_name: str, context: dict) -> str:
+    """Respostas pré-definidas para bots quando APIs falham"""
+    fallbacks = {
+        "Shadow_Hunter": "Hmm... preciso investigar isso mais a fundo.",
+        "Night_Stalker": "...",
+        "Dark_Phoenix": "Eu... eu não sei o que dizer...",
+        "Silent_Reaper": "Irrelevante.",
+        "Ghost_Whisper": "Ah, isso é interessante...",
+        "Blood_Moon": "Isso não pode ser coincidência!",
+        "Crimson_Blade": "Vamos ao ponto.",
+        "Phantom_Eyes": "Deixe-me refletir sobre isso.",
+        "Raven_Soul": "Sinto uma energia estranha aqui...",
+        "Death_Dealer": "Já vi isso antes."
+    }
+    return fallbacks.get(bot_name, "Sem comentários.")
 
 
 async def process_bot_turn(room_id: str):
