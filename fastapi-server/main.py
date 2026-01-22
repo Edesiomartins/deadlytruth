@@ -152,7 +152,12 @@ async def generate_case(prompt_template: str = None):
         
         result = response.choices[0].message.content
         logger.info(f"✅ Caso gerado com sucesso: {len(result)} chars")
-        return result
+        
+        # ✅ Limpa JSON se necessário (remove markdown backticks)
+        result_clean = clean_json_response(result)
+        logger.info(f"✅ JSON limpo: {len(result_clean)} chars")
+        
+        return result_clean
         
     except asyncio.TimeoutError:
         logger.error(f"⏱️ Timeout na API {provider.upper()}")
