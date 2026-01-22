@@ -69,47 +69,92 @@ def get_groq_case_client():
 
 async def generate_case(prompt_template: str = None):
     """
-    Gera um caso de assassinato usando IA via modelo LLaMA 3.3 70B Versatile (Groq).
+    Gera um caso de assassinato usando IA via provedor configurado (Groq, DeepSeek ou OpenRouter).
     Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
+    O provedor é escolhido via variável de ambiente AI_PROVIDER.
     """
     try:
         # Logging detalhado
         logger.info(f"🔄 Iniciando geração de caso...")
-        logger.info(f"API Key presente: {'GROQ_API_KEY' in os.environ}")
-        api_key = os.getenv("GROQ_API_KEY", "")
-        logger.info(f"API Key length: {len(api_key)}")
-        
-        if not api_key:
-            raise ValueError("GROQ_API_KEY não encontrada no ambiente")
         
         # Usa o prompt fornecido ou o template padrão
         user_prompt = prompt_template or CREATE_CASE_TEMPLATE
         
-        # Obtém o cliente Groq
-        client = get_groq_case_client()
+        # Determina qual provedor usar
+        provider = os.getenv("AI_PROVIDER", "groq").lower()
         
-        logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.3-70b-versatile)...")
-        
-        response = await asyncio.wait_for(
-            asyncio.to_thread(
-                client.chat.completions.create,
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": SYSTEM_GAME_MASTER},
-                    {"role": "user", "content": user_prompt}
-                ],
-                temperature=0.8,
-                max_tokens=2000
-            ),
-            timeout=15.0  # Timeout aumentado para 15 segundos
-        )
+        if provider == "openrouter":
+            # Usa OpenRouter
+            api_key = os.getenv("OPENROUTER_API_KEY", "")
+            if not api_key:
+                raise ValueError("OPENROUTER_API_KEY não encontrada no ambiente")
+            logger.info(f"🔄 Gerando caso com OpenRouter...")
+            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+            logger.info(f"   Modelo: {model}")
+            
+            client = get_openrouter_client()
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": SYSTEM_GAME_MASTER},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=2000
+                ),
+                timeout=30.0  # Timeout aumentado para OpenRouter
+            )
+        elif provider == "deepseek":
+            # Usa DeepSeek
+            api_key = os.getenv("DEEPSEEK_API_KEY", "")
+            if not api_key:
+                raise ValueError("DEEPSEEK_API_KEY não encontrada no ambiente")
+            logger.info(f"🔄 Gerando caso com DeepSeek...")
+            
+            client = get_deepseek_client()
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model="deepseek-chat",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_GAME_MASTER},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=2000
+                ),
+                timeout=30.0
+            )
+        else:
+            # Usa Groq (padrão)
+            api_key = os.getenv("GROQ_API_KEY", "")
+            if not api_key:
+                raise ValueError("GROQ_API_KEY não encontrada no ambiente")
+            logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.3-70b-versatile)...")
+            
+            client = get_groq_case_client()
+            response = await asyncio.wait_for(
+                asyncio.to_thread(
+                    client.chat.completions.create,
+                    model="llama-3.3-70b-versatile",
+                    messages=[
+                        {"role": "system", "content": SYSTEM_GAME_MASTER},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    temperature=0.8,
+                    max_tokens=2000
+                ),
+                timeout=15.0
+            )
         
         result = response.choices[0].message.content
         logger.info(f"✅ Caso gerado com sucesso: {len(result)} chars")
         return result
         
     except asyncio.TimeoutError:
-        logger.error("⏱️ Timeout na API Groq")
+        logger.error(f"⏱️ Timeout na API {provider.upper()}")
         return generate_fallback_case()
     except Exception as e:
         logger.error(f"❌ Erro ao gerar caso: {str(e)}", exc_info=True)
@@ -360,6 +405,7 @@ app.include_router(auth_router)
 # Clientes AI (inicializados lazy)
 _groq_client = None
 _deepseek_client = None
+_openrouter_client = None
 
 # Armazenamento em memória (em produção, usar Redis ou DB)
 ROOMS = {}  # {room_id: {"case": {...}, "chat": [...], "nivel": "...", "players": [...], "current_turn": int, "game_active": bool}}
@@ -394,11 +440,27 @@ def get_deepseek_client():
     return _deepseek_client
 
 
+def get_openrouter_client():
+    """Obtém ou cria o cliente OpenRouter (lazy initialization)"""
+    global _openrouter_client
+    if _openrouter_client is None:
+        api_key = os.getenv("OPENROUTER_API_KEY")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY não encontrada no .env")
+        _openrouter_client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1"
+        )
+    return _openrouter_client
+
+
 def ai_generate(prompt: str, system: str = None) -> str:
     """
-    Gera resposta usando o provedor de IA configurado (Groq ou DeepSeek)
-    Provedor é escolhido via variável de ambiente AI_PROVIDER (groq ou deepseek)
+    Gera resposta usando o provedor de IA configurado (Groq, DeepSeek ou OpenRouter)
+    Provedor é escolhido via variável de ambiente AI_PROVIDER (groq, deepseek ou openrouter)
     Padrão: groq
+    
+    Para OpenRouter, você pode especificar o modelo via OPENROUTER_MODEL (padrão: meta-llama/llama-3.3-70b-instruct)
     """
     provider = os.getenv("AI_PROVIDER", "groq").lower()
     
@@ -419,20 +481,32 @@ def ai_generate(prompt: str, system: str = None) -> str:
                 max_tokens=2048
             )
             return completion.choices[0].message.content or ""
+        elif provider == "openrouter":
+            # Usa OpenRouter (acesso a múltiplos modelos)
+            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+            print(f"🤖 Usando OpenRouter (modelo: {model})...")
+            client = get_openrouter_client()
+            completion = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.8,
+                max_tokens=2000
+            )
+            return completion.choices[0].message.content or ""
         else:
             # Usa Groq (padrão)
             print(f"🤖 Usando Groq (Llama 3.3 70B Versatile)...")
-        client = get_groq_client()
-        completion = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=1,
-            max_completion_tokens=1024,
-            top_p=1,
-            stream=False,
-            stop=None
-        )
-        return completion.choices[0].message.content or ""
+            client = get_groq_client()
+            completion = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=messages,
+                temperature=1,
+                max_completion_tokens=1024,
+                top_p=1,
+                stream=False,
+                stop=None
+            )
+            return completion.choices[0].message.content or ""
     except ValueError as e:
         return f"Erro de configuração ({provider}): {str(e)}"
     except Exception as e:
