@@ -2384,17 +2384,23 @@ async def ws_room(websocket: WebSocket, room_id: str):
     
     # Verifica se o jogador já está na lista
     existing_player = None
-    for p in room.get("players", []):
+    player_numeric_id = None
+    for idx, p in enumerate(room.get("players", [])):
         if isinstance(p, dict):
             if str(p.get("name", "")) == player_identifier or str(p.get("id", "")) == player_identifier:
                 existing_player = p
+                # ✅ Extrair ID numérico do jogador existente
+                player_numeric_id = p.get("numeric_id", idx + 1)
                 break
     
     # Se não existe, adiciona à lista
     if not existing_player:
+        # ✅ CORREÇÃO: Criar ID numérico baseado no índice (1, 2, 3, ...)
+        player_numeric_id = len(room.get("players", [])) + 1
         player_data = {
-            "id": str(player_identifier),  # ✅ Garantir que seja string
-            "name": str(player_identifier),  # ✅ Garantir que seja string
+            "id": str(player_identifier),  # ✅ ID string (nome)
+            "name": str(player_identifier),  # ✅ Nome do jogador
+            "numeric_id": player_numeric_id,  # ✅ ID NUMÉRICO (1, 2, 3, ...)
             "status": "online",
             "isBot": False,
             "is_bot": False,
@@ -2403,12 +2409,16 @@ async def ws_room(websocket: WebSocket, room_id: str):
         if "players" not in room:
             room["players"] = []
         room["players"].append(player_data)
-        logger.info(f"✅ Jogador {player_identifier} adicionado à sala {room_id}")
+        logger.info(f"✅ Jogador {player_identifier} adicionado à sala {room_id} com ID numérico: {player_numeric_id}")
     else:
         # ✅ CORREÇÃO: Se o jogador já existe, marca como reconectado
         existing_player["is_connected"] = True
         existing_player["disconnect_time"] = None
-        logger.info(f"🔄 Jogador {player_identifier} reconectado na sala {room_id}")
+        # Garante que tem numeric_id
+        if "numeric_id" not in existing_player:
+            existing_player["numeric_id"] = player_numeric_id or (room.get("players", []).index(existing_player) + 1)
+        player_numeric_id = existing_player.get("numeric_id", player_numeric_id)
+        logger.info(f"🔄 Jogador {player_identifier} reconectado na sala {room_id} com ID numérico: {player_numeric_id}")
     
     # Registra o jogador no game_state
     register_player(room_id, player_identifier)
@@ -2453,12 +2463,24 @@ async def ws_room(websocket: WebSocket, room_id: str):
             }
         }))
     
+    # ✅ CORREÇÃO: Enviar player_id NUMÉRICO no "hello"
+    # Garante que player_numeric_id está definido
+    if player_numeric_id is None:
+        # Busca o ID numérico do jogador na lista
+        for idx, p in enumerate(room.get("players", [])):
+            if isinstance(p, dict) and (str(p.get("name", "")) == player_identifier or str(p.get("id", "")) == player_identifier):
+                player_numeric_id = p.get("numeric_id", idx + 1)
+                break
+        if player_numeric_id is None:
+            player_numeric_id = len(room.get("players", []))
+    
     # Envia estado inicial com lista de jogadores
     await websocket.send_text(json.dumps({
         "type": "hello",
         "payload": {
             "room_id": room_id,
-            "player_id": player_identifier,
+            "player_id": player_numeric_id,  # ✅ ID NUMÉRICO (1, 2, 3, ...)
+            "player_name": player_identifier,  # ✅ Nome do jogador
             "players": len(CONNECTIONS[room_id]),
             "total_players": len(room.get("players", [])),
             "case": room.get("case"),
@@ -2467,6 +2489,8 @@ async def ws_room(websocket: WebSocket, room_id: str):
         },
         "players_list": room.get("players", [])  # Envia lista completa de jogadores
     }))
+    
+    logger.info(f"✅ Hello enviado com player_id numérico: {player_numeric_id} para {player_identifier}")
     
     # Envia atualização de jogadores para sincronizar
     await broadcast(room_id, {
