@@ -103,7 +103,7 @@ export default function Game() {
     const handleWebSocketMessage = (message) => {
         switch (message.type) {
             case "hello":
-                console.log("👋 Conectado à sala");
+                console.log("👋 Conectado à sala", message);
                 // Extrair seu ID do payload
                 if (message.payload?.player_id) {
                     setMyPlayerId(String(message.payload.player_id));
@@ -114,6 +114,12 @@ export default function Game() {
                     setMyPlayerId(String(message.player_id));
                     console.log("✅ Seu ID (direto):", message.player_id);
                 }
+                // Pode vir como player_name ou nickname também
+                if (message.player_name && !myPlayerId) {
+                    setMyPlayerId(String(message.player_name));
+                    setMyPlayerName(message.player_name);
+                    console.log("✅ Seu ID (player_name):", message.player_name);
+                }
                 // Inicializa lista de jogadores se disponível
                 if (message.payload?.players && Array.isArray(message.payload.players)) {
                     setPlayers(message.payload.players);
@@ -121,6 +127,14 @@ export default function Game() {
                 // Handler para caso recebido via hello
                 if (message.case) {
                     setCaso(message.case);
+                }
+                // ✅ Se houver current_turn no hello, definir
+                if (message.current_turn || message.current_turn_player_id) {
+                    const turnId = String(message.current_turn || message.current_turn_player_id || "");
+                    if (turnId) {
+                        setCurrentTurnPlayerId(turnId);
+                        console.log("🎯 Turno inicial do hello:", turnId);
+                    }
                 }
                 break;
             
@@ -195,6 +209,30 @@ export default function Game() {
                 const turnoId = String(message.player_id || "");
                 if (turnoId) {
                     setCurrentTurnPlayerId(turnoId);
+                }
+                break;
+            
+            case "turn_change":
+                console.log("🎯 Turno mudou:", message.current_player);
+                // ✅ TRATAR turn_change - pode vir com current_player (nome) ou player_id
+                if (message.current_player) {
+                    // Buscar o ID do jogador pelo nome
+                    const player = players.find(p => 
+                        p.name === message.current_player || 
+                        p.nickname === message.current_player ||
+                        String(p.id) === String(message.current_player)
+                    );
+                    if (player) {
+                        setCurrentTurnPlayerId(String(player.id || player.name || message.current_player));
+                        setCurrentPlayerName(message.current_player);
+                    } else {
+                        // Se não encontrar, usar o nome diretamente
+                        setCurrentTurnPlayerId(String(message.current_player));
+                        setCurrentPlayerName(message.current_player);
+                    }
+                }
+                if (message.player_id) {
+                    setCurrentTurnPlayerId(String(message.player_id));
                 }
                 break;
             
