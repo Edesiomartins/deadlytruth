@@ -2198,8 +2198,9 @@ async def game_loop(room_id: str):
             is_bot = player_data.get("isBot", False) if isinstance(player_data, dict) else False
             player_name = player_data.get("name", f"Jogador {idx+1}") if isinstance(player_data, dict) else str(player_data)
             is_killer = player_data.get("is_killer", False) if isinstance(player_data, dict) else False
-            player_id = player_data.get("id", idx) if isinstance(player_data, dict) else idx
-            player_identifier = player_data.get("id") or player_name if isinstance(player_data, dict) else player_name
+            # ✅ CORREÇÃO: Usar numeric_id se disponível, senão usar índice + 1
+            player_id = player_data.get("numeric_id", idx + 1) if isinstance(player_data, dict) else (idx + 1)
+            player_identifier = str(player_data.get("numeric_id", player_data.get("id", idx + 1))) if isinstance(player_data, dict) else str(idx + 1)
             
             # Atualiza o turno atual no game_state (sempre como string)
             set_current_turn(room_id, str(player_identifier))
