@@ -576,9 +576,68 @@ BOT_PERSONALITIES = {
 }
 
 
+async def _generate_response_openrouter(bot_name: str, context_str: str) -> str:
+    """Tenta gerar resposta via OpenRouter."""
+    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    if not openrouter_api_key:
+        raise ValueError("OPENROUTER_API_KEY não configurada.")
+
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {openrouter_api_key}",
+                "HTTP-Referer": "https://deadlytruth.app",
+                "X-Title": "Deadly Truth Game",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "deepseek/deepseek-chat",  # Modelo DeepSeek via OpenRouter
+                "messages": [
+                    {"role": "system", "content": f"Você é o bot {bot_name} em um jogo de mistério. Responda de forma concisa e no personagem."},
+                    {"role": "user", "content": context_str}
+                ],
+                "temperature": 0.8,
+                "max_tokens": 150
+            },
+            timeout=10.0
+        )
+        response.raise_for_status()  # Levanta exceção para status de erro (4xx, 5xx)
+        data = response.json()
+        message = data["choices"][0]["message"]["content"]
+        logger.info(f"✅ Bot {bot_name} respondeu via OpenRouter.")
+        return message
+
+
+async def _generate_response_groq(bot_name: str, context_str: str) -> str:
+    """Tenta gerar resposta via Groq."""
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        raise ValueError("GROQ_API_KEY não configurada.")
+
+    groq_client = get_groq_client()
+    response = await asyncio.wait_for(
+        asyncio.to_thread(
+            lambda: groq_client.chat.completions.create(
+                model="llama-3.3-70b-versatile",  # ✅ Modelo Groq atualizado
+                messages=[
+                    {"role": "system", "content": f"Você é o bot {bot_name} em um jogo de mistério. Responda de forma concisa e no personagem."},
+                    {"role": "user", "content": context_str}
+                ],
+                temperature=0.8,
+                max_tokens=150
+            )
+        ),
+        timeout=10.0
+    )
+    message = response.choices[0].message.content
+    logger.info(f"✅ Bot {bot_name} respondeu via Groq.")
+    return message
+
+
 async def bot_generate_response(bot_name: str, context: dict, question: str = None) -> str:
     """
-    Gera resposta de um bot usando DeepSeek para interação natural como jogador humano.
+    Gera resposta de um bot usando sistema de cascata: OpenRouter → Groq → Fallback.
     Os bots analisam pistas e interagem como se fossem jogadores reais.
     
     Args:
@@ -687,69 +746,107 @@ CONVERSA RECENTE:
 
 É sua vez de falar. Como {bot_name}, analise as evidências disponíveis e faça uma observação, pergunta ou análise relevante como um jogador humano tentando descobrir o culpado (máx 2-3 frases):"""
     
-    # Gera resposta usando OpenRouter via httpx (GRATUITO)
+    # Monta o contexto completo para enviar
+    full_context = f"{system_prompt}\n\n{user_prompt}"
+    
+    # ✅ Sistema de cascata: OpenRouter → Groq → Fallback
+    # 1️⃣ Tentar OpenRouter
     try:
-        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        if not openrouter_api_key:
-            logger.warning(f"⚠️ OPENROUTER_API_KEY não encontrada, usando fallback para bot {bot_name}")
-            return generate_bot_response_fallback(bot_name, context)
-        
-        # Monta o prompt completo combinando system e user
-        full_context = f"{system_prompt}\n\n{user_prompt}"
-        
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {openrouter_api_key}",
-                    "HTTP-Referer": "https://deadlytruth.app",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "deepseek/deepseek-chat",  # ✅ GRATUITO no OpenRouter
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": full_context
-                        }
-                    ],
-                    "temperature": 0.8,
-                    "max_tokens": 150
-                },
-                timeout=10.0
-            )
-            
-            if response.status_code == 200:
-                data = response.json()
-                bot_response = data["choices"][0]["message"]["content"].strip()
-                # Limpa a resposta (remove aspas extras, etc)
-                bot_response = bot_response.strip().strip('"\'')
-                logger.info(f"✅ Bot {bot_name} respondeu via OpenRouter")
-                return bot_response
-            else:
-                logger.warning(f"⚠️ OpenRouter erro {response.status_code}: {response.text}")
-                return generate_bot_response_fallback(bot_name, context)
-                
+        return await _generate_response_openrouter(bot_name, full_context)
     except Exception as e:
-        logger.warning(f"⚠️ OpenRouter falhou para bot {bot_name}: {e}")
-        return generate_bot_response_fallback(bot_name, context)
+        logger.warning(f"❌ OpenRouter falhou para {bot_name}: {e}")
+    
+    # 2️⃣ Tentar Groq
+    try:
+        return await _generate_response_groq(bot_name, full_context)
+    except Exception as e:
+        logger.warning(f"❌ Groq falhou para {bot_name}: {e}")
+    
+    # 3️⃣ Usar fallback
+    logger.warning(f"⚠️ Ambas as APIs falharam para {bot_name}. Usando fallback.")
+    return generate_bot_response_fallback(bot_name, context)
+
+
+def clean_json_response(response_text: str) -> str:
+    """Remove markdown backticks e limpa JSON"""
+    # Remove ```json no início
+    response_text = re.sub(r'^```json\s*', '', response_text, flags=re.MULTILINE)
+    # Remove ``` no início
+    response_text = re.sub(r'^```\s*', '', response_text, flags=re.MULTILINE)
+    # Remove ```json no final
+    response_text = re.sub(r'\s*```json$', '', response_text, flags=re.MULTILINE)
+    # Remove ``` no final
+    response_text = re.sub(r'\s*```$', '', response_text, flags=re.MULTILINE)
+    return response_text.strip()
 
 
 def generate_bot_response_fallback(bot_name: str, context: dict) -> str:
     """Respostas pré-definidas para bots quando APIs falham"""
-    fallbacks = {
-        "Shadow_Hunter": "Hmm... preciso investigar isso mais a fundo.",
-        "Night_Stalker": "...",
-        "Dark_Phoenix": "Eu... eu não sei o que dizer...",
-        "Silent_Reaper": "Irrelevante.",
-        "Ghost_Whisper": "Ah, isso é interessante...",
-        "Blood_Moon": "Isso não pode ser coincidência!",
-        "Crimson_Blade": "Vamos ao ponto.",
-        "Phantom_Eyes": "Deixe-me refletir sobre isso.",
-        "Raven_Soul": "Sinto uma energia estranha aqui...",
-        "Death_Dealer": "Já vi isso antes."
+    responses = {
+        "Shadow_Hunter": [
+            "Hmm... preciso investigar isso mais a fundo.",
+            "Algo não está batendo aqui.",
+            "Vou analisar essas evidências com mais cuidado."
+        ],
+        "Night_Stalker": [
+            "...",
+            "Interessante.",
+            "Hmm."
+        ],
+        "Dark_Phoenix": [
+            "Não tenho nada a ver com isso.",
+            "Estava em outro lugar naquela hora.",
+            "Vocês estão acusando a pessoa errada.",
+            "Eu não fiz nada de errado.",
+            "Eu... eu não sei o que dizer..."
+        ],
+        "Silent_Reaper": [
+            "Eu vi algo estranho naquela noite.",
+            "Alguém estava agindo suspeito.",
+            "Não confio em ninguém aqui.",
+            "Há mais coisas acontecendo do que vocês pensam.",
+            "Irrelevante."
+        ],
+        "Ghost_Whisper": [
+            "Ah, isso é interessante...",
+            "Eu conheço alguns segredos aqui.",
+            "Alguém está escondendo algo."
+        ],
+        "Blood_Moon": [
+            "Isso não pode ser coincidência!",
+            "Algo muito suspeito está acontecendo!",
+            "Precisamos investigar isso imediatamente!"
+        ],
+        "Crimson_Blade": [
+            "Vamos ao ponto.",
+            "Chega de conversa fiada.",
+            "Preciso de respostas diretas."
+        ],
+        "Phantom_Eyes": [
+            "Deixe-me refletir sobre isso.",
+            "Há algo que não está certo aqui.",
+            "Preciso de mais informações."
+        ],
+        "Raven_Soul": [
+            "Sinto uma energia estranha aqui...",
+            "Algo sobrenatural está acontecendo.",
+            "As energias não estão alinhadas."
+        ],
+        "Death_Dealer": [
+            "Já vi isso antes.",
+            "No meu tempo, isso era diferente.",
+            "Conheço esse tipo de situação."
+        ],
+        "LeeJunFan": [
+            "Preciso de mais informações.",
+            "Alguém está mentindo aqui.",
+            "Vamos investigar isso juntos.",
+            "Tenho uma teoria sobre o que aconteceu."
+        ]
     }
-    return fallbacks.get(bot_name, "Sem comentários.")
+    
+    bot_responses = responses.get(bot_name, ["Sem comentários."])
+    return random.choice(bot_responses)
 
 
 async def process_bot_turn(room_id: str):
