@@ -1376,6 +1376,80 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     }
 
 
+async def advance_turn_on_disconnect(room_id: str):
+    """
+    Avança o turno para o próximo jogador vivo quando o jogador atual desconecta.
+    """
+    room = ROOMS.get(room_id)
+    if not room or not room.get("game_active"):
+        return
+    
+    participantes = room.get("players", [])
+    if not participantes:
+        return
+    
+    # Encontra o índice do jogador atual
+    current_turn_id = get_current_turn(room_id)
+    current_idx = None
+    
+    for idx, p in enumerate(participantes):
+        if isinstance(p, dict):
+            player_id = str(p.get("id") or p.get("name", ""))
+            if str(current_turn_id).lower() == player_id.lower():
+                current_idx = idx
+                break
+    
+    if current_idx is None:
+        logger.warning(f"⚠️ Não foi possível encontrar o índice do jogador atual ({current_turn_id})")
+        return
+    
+    # Encontra o próximo jogador vivo
+    next_idx = None
+    for i in range(1, len(participantes)):
+        next_candidate_idx = (current_idx + i) % len(participantes)
+        next_player = participantes[next_candidate_idx]
+        if isinstance(next_player, dict) and next_player.get("status") != "dead":
+            next_idx = next_candidate_idx
+            break
+    
+    if next_idx is None:
+        logger.warning(f"⚠️ Não foi possível encontrar próximo jogador vivo")
+        return
+    
+    # Atualiza o turno
+    room["current_turn"] = next_idx
+    next_player = participantes[next_idx]
+    next_player_id = str(next_player.get("id") or next_player.get("name", ""))
+    next_player_name = next_player.get("name", "Jogador")
+    
+    # Atualiza game_state
+    set_current_turn(room_id, next_player_id)
+    
+    # Notifica todos sobre o novo turno
+    await broadcast(room_id, {
+        "type": "turn_start",
+        "turnoAtual": next_player_id,
+        "player": next_player_name,
+        "player_name": next_player_name,
+        "player_id": next_player.get("id"),
+        "player_identifier": next_player_id,
+        "turn_index": next_idx,
+        "time_limit": 60,
+        "message": f"⏭️ Turno passado para {next_player_name}"
+    })
+    
+    await broadcast(room_id, {
+        "type": "turno",
+        "player_id": next_player_id
+    })
+    
+    logger.info(f"✅ Turno avançado de {current_turn_id} para {next_player_id} ({next_player_name})")
+    
+    # Se o próximo for bot, processa automaticamente
+    if next_player.get("isBot", False) or next_player.get("is_bot", False):
+        await process_bot_turn(room_id)
+
+
 async def process_bot_votes(room_id: str):
     """
     Bots votam automaticamente após 2 segundos de uma votação iniciada.
@@ -2003,7 +2077,12 @@ async def ws_room(websocket: WebSocket, room_id: str):
         if "players" not in room:
             room["players"] = []
         room["players"].append(player_data)
-        print(f"✅ Jogador {player_identifier} adicionado à sala {room_id}")
+        logger.info(f"✅ Jogador {player_identifier} adicionado à sala {room_id}")
+    else:
+        # ✅ CORREÇÃO: Se o jogador já existe, marca como reconectado
+        existing_player["is_connected"] = True
+        existing_player["disconnect_time"] = None
+        logger.info(f"🔄 Jogador {player_identifier} reconectado na sala {room_id}")
     
     # Registra o jogador no game_state
     register_player(room_id, player_identifier)
@@ -2467,13 +2546,14 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 player_id_str = str(disconnected_player.get("id") or disconnected_player.get("name", ""))
                 if str(current_turn_id).lower() == player_id_str.lower():
                     logger.info(f"⏭️ Jogador {player_identifier} desconectou durante seu turno. Passando para próximo.")
-                    # Avança turno (lógica simplificada - pode ser melhorada)
-                    # Por enquanto, apenas notifica
+                    # ✅ CORREÇÃO: Avança o turno de fato
                     await broadcast(room_id, {
                         "type": "player_disconnected",
                         "player": player_identifier,
                         "message": f"⚠️ {player_identifier} desconectou. Turno será passado."
                     })
+                    # Avança para o próximo jogador vivo
+                    await advance_turn_on_disconnect(room_id)
             
             # Notifica todos sobre a desconexão (mas não remove)
             await broadcast(room_id, {
