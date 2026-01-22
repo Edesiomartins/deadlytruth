@@ -624,6 +624,26 @@ export default function Game() {
                                 </>
                             );
                         })()}
+                        
+                        {/* ✅ BOTÃO DE MATAR - APENAS SE FOR ASSASSINO E SEU TURNO */}
+                        {isKiller && isMyTurn && alivePlayersForKill.length > 0 && (
+                            <div className="mt-4 pt-4 border-t border-accentRed/30">
+                                <h3 className="text-xs font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-2">
+                                    🔪 Matar Jogador
+                                </h3>
+                                <div className="space-y-2">
+                                    {alivePlayersForKill.map(player => (
+                                        <button
+                                            key={player.id}
+                                            onClick={() => handleKill(player.id)}
+                                            className="w-full px-3 py-2 bg-accentRed/20 hover:bg-accentRed/30 border border-accentRed/40 rounded-lg text-xs text-accentRed font-roboto transition-all"
+                                        >
+                                            🔪 Matar {player.nickname || player.name || player.id}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
