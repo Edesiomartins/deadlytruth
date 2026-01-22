@@ -1675,7 +1675,7 @@ async def game_loop(room_id: str):
                 logger.error(f"❌ Erro ao parsear JSON do caso: {e}")
                 logger.error(f"   Conteúdo recebido: {case_json[:500]}")
                 # Usa extract_json_from_string como fallback
-    case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+                case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
         elif isinstance(case_json, dict):
             # Já é um dict, usa diretamente
             case_data = case_json
@@ -2634,7 +2634,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
         logger.info(f"🔌 WebSocket desconectado: {player_identifier} da sala {room_id}")
         
         if websocket in CONNECTIONS.get(room_id, []):
-        CONNECTIONS[room_id].remove(websocket)
+            CONNECTIONS[room_id].remove(websocket)
         
         # Marca jogador como "away" em vez de remover completamente
         room = ROOMS.get(room_id)
