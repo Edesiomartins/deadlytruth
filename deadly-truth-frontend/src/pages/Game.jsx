@@ -28,6 +28,7 @@ export default function Game() {
   const [caso, setCaso] = useState(null); // Caso recebido via mensagem tipo "caso"
   const [pistas, setPistas] = useState([]); // Lista de pistas descobertas
   const [turnoAtual, setTurnoAtual] = useState(null); // ID do jogador da vez
+  const [currentTurnPlayerId, setCurrentTurnPlayerId] = useState(null); // ✅ ID do jogador atual (sincronizado)
   
   const messagesEndRef = useRef(null);
   const turnTimerRef = useRef(null);
@@ -74,7 +75,14 @@ export default function Game() {
         
         if (data.type === "game_start") {
           console.log("🎮 game_start recebido:", data);
-          let caseData = data.payload?.case;
+          
+          // ✅ CORREÇÃO: Validar dados
+          if (!data.case || !data.players) {
+            console.error("❌ Dados incompletos:", data);
+            return;
+          }
+          
+          let caseData = data.case;
           
           // Se o caso vier como string JSON, tenta parsear
           if (typeof caseData === "string") {
@@ -113,12 +121,34 @@ export default function Game() {
             };
           }
           
+          // ✅ CORREÇÃO: Garantir que current_turn_player_id não é vazio
+          const currentTurnId = String(data.current_turn_player_id || "");
+          console.log("🎯 current_turn_player_id:", currentTurnId);
+          
+          if (!currentTurnId) {
+            console.error("❌ current_turn_player_id está vazio!");
+            addSystemMessage("Erro: ID do turno não definido");
+            return;
+          }
+          
           // Define o caso se for válido (sempre como objeto)
           if (caseData && typeof caseData === "object") {
             console.log("✅ Caso recebido via game_start:", caseData);
             setCaso(caseData);
             setGameCase(caseData);
           }
+          
+          // ✅ CORREÇÃO: Armazenar corretamente
+          setPistas([]);
+          setPlayers(data.players);
+          setCurrentTurnPlayerId(currentTurnId);  // ✅ Armazenar corretamente
+          setGameActive(true);
+          setGameState("playing");
+          
+          // Verifica se é o turno do jogador
+          const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+          const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
+          console.log("✅ Estado atualizado. Seu turno?", meuID === currentTurnId);
           
           // Mensagem do mestre anunciando o caso
           const caseDesc = caseData.descricao || "Um novo mistério foi revelado...";
@@ -133,14 +163,26 @@ export default function Game() {
         }
         
         if (data.type === "turn_start") {
+          console.log("🎯 turn_start recebido:", data);
+          
           setCurrentTurn(data.turn_index || 0);
-          const playerName = data.player;
+          const playerName = data.player_name || data.player;
           const playerIdentifier = data.player_identifier || playerName;
-          const playerId = data.player_id || data.player_identifier || playerName;
+          
+          // ✅ CORREÇÃO: Garantir que turnoAtual não é vazio
+          const turnoId = String(data.turnoAtual || data.player_id || data.player_identifier || "");
+          console.log("🎯 Novo turno:", turnoId, "de", playerName);
+          
+          if (!turnoId) {
+            console.error("❌ turnoAtual está vazio!");
+            return;
+          }
+          
           setCurrentPlayerName(playerName);
           
-          // Atualiza turnoAtual com o ID do jogador da vez
-          setTurnoAtual(playerId);
+          // ✅ CORREÇÃO: Atualizar corretamente
+          setCurrentTurnPlayerId(turnoId);  // ✅ Atualizar corretamente
+          setTurnoAtual(turnoId);
           
           // Atualiza tempos
           if (data.time_limit) {
@@ -171,17 +213,18 @@ export default function Game() {
             });
           }, 1000);
           
-          // Verifica se é a vez do jogador atual
+          // ✅ CORREÇÃO: Verifica se é a vez do jogador atual
           const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
           const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
           
-          // Compara IDs (convertendo para número se necessário)
-          const isMyTurn = playerId === meuID || 
-                          parseInt(playerId) === parseInt(meuID) ||
-                          playerName === myName || 
-                          playerIdentifier === myName ||
-                          playerIdentifier === meuID;
+          // Compara IDs (convertendo para string para consistência)
+          const isMyTurn = String(turnoId) === String(meuID) || 
+                          String(turnoId) === String(myName) ||
+                          String(playerIdentifier) === String(meuID) ||
+                          String(playerIdentifier) === String(myName);
           setIsMyTurn(isMyTurn);
+          
+          console.log("✅ Seu turno agora?", isMyTurn, "turnoId:", turnoId, "meuID:", meuID);
           
           // Todos são suspeitos - não revela se é bot ou humano
           addSystemMessage(`🔍 Vez de ${playerName} (${turnTime}s)`);
@@ -383,20 +426,29 @@ export default function Game() {
         }
         
         if (data.type === "turno") {
-          // Atualiza o turno atual para validação
-          setTurnoAtual(data.player_id);
+          console.log("🎯 turno recebido:", data);
+          
+          // ✅ CORREÇÃO: Garantir que player_id não é vazio
+          const playerId = String(data.player_id || "");
+          if (!playerId) {
+            console.error("❌ player_id está vazio!");
+            return;
+          }
+          
+          // ✅ CORREÇÃO: Atualizar corretamente
+          setCurrentTurnPlayerId(playerId);
+          setTurnoAtual(playerId);
           
           // Também atualiza isMyTurn para compatibilidade
           const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
           const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
-          const currentPlayerId = data.player_id;
           
-          // Compara IDs (convertendo para número se necessário)
-          const isMyTurn = currentPlayerId === meuID || 
-                          parseInt(currentPlayerId) === parseInt(meuID) ||
-                          currentPlayerId === myName || 
-                          currentPlayerId?.toLowerCase() === myName?.toLowerCase();
+          // Compara IDs (convertendo para string para consistência)
+          const isMyTurn = String(playerId) === String(meuID) || 
+                          String(playerId) === String(myName);
           setIsMyTurn(isMyTurn);
+          
+          console.log("✅ Turno atualizado para:", playerId, "Seu turno?", isMyTurn);
         }
         
       } catch (e) {
@@ -440,21 +492,48 @@ export default function Game() {
   };
 
   const sendMessage = () => {
-    // Só permite enviar mensagem se for a vez do jogador
-    if (!isMyTurn) {
-      addSystemMessage("⏳ Aguarde sua vez para enviar mensagens!");
+    console.log("📤 Tentando enviar mensagem");
+    
+    // ✅ CORREÇÃO: Validação de turno robusta
+    const myName = user?.nickname || user?.email?.split('@')[0] || "Você";
+    const meuID = localStorage.getItem("player_id") || user?.id || user?.email?.split('@')[0] || myName;
+    const currentTurnId = turnoAtual || currentTurnPlayerId;
+    
+    console.log("   myPlayerId:", meuID, "tipo:", typeof meuID);
+    console.log("   currentTurnPlayerId:", currentTurnId, "tipo:", typeof currentTurnId);
+    console.log("   isMyTurn:", isMyTurn);
+    
+    // ✅ CORREÇÃO: Validação clara de turno
+    const isMyTurnValid = currentTurnId && meuID && 
+                         (String(currentTurnId) === String(meuID) || 
+                          String(currentTurnId) === String(myName));
+    
+    if (!isMyTurnValid) {
+      console.warn("⏳ Não é sua vez!");
+      addSystemMessage("⏳ Aguarde sua vez!");
       return;
     }
     
-    if (newMessage.trim() && ws && connected) {
-      const messageText = newMessage.trim();
-      ws.send(JSON.stringify({
-        type: "message",
-        text: messageText
-      }));
-      // Não adiciona imediatamente - espera confirmação do servidor
-      setNewMessage("");
+    if (!newMessage.trim()) {
+      addSystemMessage("📝 Digite uma mensagem");
+      return;
     }
+    
+    if (!ws || !connected) {
+      addSystemMessage("❌ Não conectado ao servidor");
+      return;
+    }
+    
+    // ✅ CORREÇÃO: Enviar mensagem com player_id
+    const messageText = newMessage.trim();
+    ws.send(JSON.stringify({
+      type: "message",
+      text: messageText,
+      player_id: meuID
+    }));
+    
+    setNewMessage("");
+    console.log("✅ Mensagem enviada");
   };
 
   const handleLeave = () => {

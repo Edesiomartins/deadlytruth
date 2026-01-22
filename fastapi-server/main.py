@@ -1433,17 +1433,29 @@ def is_player_turn(room_id: str, player_identifier: str) -> tuple[bool, str]:
     """
     Verifica se é o turno do jogador.
     Retorna (True, "") se for o turno, (False, mensagem_erro) caso contrário.
+    ✅ CORREÇÃO: Validação robusta com IDs normalizados e nunca vazios.
     """
     current_turn_id = get_current_turn(room_id)
     if not current_turn_id:
+        logger.warning(f"⚠️ current_turn_id está vazio para sala {room_id}")
         return (True, "")  # Se não há turno definido, permite
     
-    # Normaliza identificadores para comparação
-    current_turn_normalized = current_turn_id.lower().strip()
-    player_identifier_normalized = player_identifier.lower().strip() if player_identifier else ""
+    # ✅ CORREÇÃO: Normalizar para string e validar que não estão vazios
+    p_id = str(player_identifier).strip() if player_identifier else ""
+    c_id = str(current_turn_id).strip() if current_turn_id else ""
+    
+    # Validar que não estão vazios
+    if not p_id or not c_id:
+        logger.warning(f"⚠️ IDs vazios: player_id={p_id}, current_turn={c_id}")
+        return (False, f"⛔ Erro: IDs de turno inválidos. (Você: {p_id}, Turno atual: {c_id})")
+    
+    # Normaliza identificadores para comparação (case-insensitive)
+    current_turn_normalized = c_id.lower()
+    player_identifier_normalized = p_id.lower()
     
     # Compara diretamente
     if current_turn_normalized == player_identifier_normalized:
+        logger.info(f"✅ Validação de turno: {p_id} == {c_id} ? True")
         return (True, "")
     
     # Tenta encontrar pelo nome na lista de players
@@ -1455,29 +1467,31 @@ def is_player_turn(room_id: str, player_identifier: str) -> tuple[bool, str]:
         
         for p in players:
             if isinstance(p, dict):
-                p_name = p.get("name", "").lower().strip()
-                p_id = str(p.get("id", "")).lower().strip()
+                p_name = str(p.get("name", "")).lower().strip()
+                p_id_from_dict = str(p.get("id", "")).lower().strip()
                 
                 # Encontra o jogador atual (da vez)
-                if p_name == current_turn_normalized or p_id == current_turn_normalized:
+                if p_name == current_turn_normalized or p_id_from_dict == current_turn_normalized:
                     current_player = p
                 
                 # Encontra o jogador que está fazendo a requisição
-                if p_name == player_identifier_normalized or p_id == player_identifier_normalized:
+                if p_name == player_identifier_normalized or p_id_from_dict == player_identifier_normalized:
                     requesting_player = p
         
         # Se encontrou ambos e são o mesmo, permite
         if current_player and requesting_player:
-            current_name = current_player.get("name", "").lower().strip()
+            current_name = str(current_player.get("name", "")).lower().strip()
             current_id = str(current_player.get("id", "")).lower().strip()
-            request_name = requesting_player.get("name", "").lower().strip()
+            request_name = str(requesting_player.get("name", "")).lower().strip()
             request_id = str(requesting_player.get("id", "")).lower().strip()
             
             if (current_name == request_name or current_id == request_id or 
                 current_name == request_id or current_id == request_name):
+                logger.info(f"✅ Validação de turno (por nome): {p_id} == {c_id} ? True")
                 return (True, "")
     
-    return (False, f"⛔ Não é sua vez. Aguarde o próximo turno. (Turno atual: {current_turn_id}, Você: {player_identifier})")
+    logger.info(f"❌ Validação de turno: {p_id} == {c_id} ? False")
+    return (False, f"⛔ Não é sua vez. Aguarde o próximo turno. (Turno atual: {c_id}, Você: {p_id})")
 
 
 async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
@@ -2196,14 +2210,19 @@ async def game_loop(room_id: str):
             elapsed_time = time.time() - game_start_time
             game_time_remaining = max(0, game_max_duration - elapsed_time)
             
+            # ✅ CORREÇÃO: Garantir que player_identifier nunca é vazio
+            if not player_identifier:
+                player_identifier = str(player_id) if player_id else player_name
+                logger.warning(f"⚠️ player_identifier estava vazio, definido para {player_identifier}")
+            
             # ✅ CORREÇÃO: Enviar turn_start com dados estruturados
-            await broadcast(room_id, {
+            turn_payload = {
                 "type": "turn_start",
-                "turnoAtual": str(player_identifier),  # Sempre string para consistência
+                "turnoAtual": str(player_identifier),  # ✅ SEMPRE string e nunca vazio
                 "player": player_name,
                 "player_name": player_name,
-                "player_id": str(player_id),
-                "player_identifier": str(player_identifier),  # ID usado no game_state
+                "player_id": str(player_id),  # ✅ SEMPRE string
+                "player_identifier": str(player_identifier),  # ✅ SEMPRE string e nunca vazio
                 "turn_index": idx,
                 "time_limit": turn_timeout,  # 1 minuto por turno
                 "game_time_remaining": int(game_time_remaining),  # Tempo restante do jogo em segundos
@@ -2211,7 +2230,10 @@ async def game_loop(room_id: str):
                 "can_end_game": can_end_game,  # Se já passou o tempo mínimo
                 "is_bot": is_bot,
                 "is_killer": is_killer  # Frontend filtra e mostra apenas para o próprio jogador
-            })
+            }
+            
+            logger.info(f"📤 Enviando turn_start: turnoAtual={turn_payload['turnoAtual']}, player={player_name}")
+            await broadcast(room_id, turn_payload)
             
             # Envia também mensagem tipo "turno" para facilitar validação no frontend
             await broadcast(room_id, {
