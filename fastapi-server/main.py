@@ -69,7 +69,7 @@ def get_groq_case_client():
 
 async def generate_case(prompt_template: str = None):
     """
-    Gera um caso de assassinato usando IA via modelo LLaMA 3.1 8B Instant (Groq).
+    Gera um caso de assassinato usando IA via modelo LLaMA 3.3 70B Versatile (Groq).
     Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
     """
     try:
@@ -88,12 +88,12 @@ async def generate_case(prompt_template: str = None):
         # Obtém o cliente Groq
         client = get_groq_case_client()
         
-        logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.1-8b-instant)...")
+        logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.3-70b-versatile)...")
         
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 client.chat.completions.create,
-                model="llama-3.1-8b-instant",
+                model="llama-3.3-70b-versatile",
                 messages=[
                     {"role": "system", "content": SYSTEM_GAME_MASTER},
                     {"role": "user", "content": user_prompt}
@@ -421,10 +421,10 @@ def ai_generate(prompt: str, system: str = None) -> str:
             return completion.choices[0].message.content or ""
         else:
             # Usa Groq (padrão)
-            print(f"🤖 Usando Groq (Llama 3.1 8B Instant)...")
+            print(f"🤖 Usando Groq (Llama 3.3 70B Versatile)...")
         client = get_groq_client()
         completion = client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=messages,
             temperature=1,
             max_completion_tokens=1024,
@@ -1015,7 +1015,7 @@ async def ask_interrogation(room_id: str, req: InterrogationRequest):
     try:
         groq_client = get_groq_case_client()
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",  # Modelo LLaMA 3.1 8B Instant
+            model="llama-3.3-70b-versatile",  # Modelo LLaMA 3.3 70B Versatile
             messages=[
                 {"role": "system", "content": SYSTEM_GAME_MASTER},
                 {"role": "user", "content": prompt}
@@ -1139,7 +1139,7 @@ Exemplo: "Pista encontrada: Fragmentos de tecido vermelho foram encontrados pert
 Responda APENAS com a pista, sem explicações adicionais:"""
         
         response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
+            model="llama-3.3-70b-versatile",
             messages=[
                 {"role": "system", "content": SYSTEM_GAME_MASTER},
                 {"role": "user", "content": prompt}
