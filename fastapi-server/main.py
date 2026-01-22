@@ -2,6 +2,9 @@ import os
 import json
 import re
 import asyncio
+import logging
+import random
+import time
 from pathlib import Path
 from datetime import datetime
 from groq import Groq  # pyright: ignore[reportMissingImports]
@@ -14,6 +17,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException  # pyri
 from fastapi.middleware.cors import CORSMiddleware  # pyright: ignore[reportMissingImports]
 from pydantic import BaseModel  # pyright: ignore[reportMissingImports]
 from dotenv import load_dotenv  # pyright: ignore[reportMissingImports]
+
+# Configurar logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 from prompts import SYSTEM_GAME_MASTER, CREATE_CASE_TEMPLATE, INTERROGATION_TEMPLATE
 from auth_routes import router as auth_router
 from auth_utils import decode_access_token
@@ -57,56 +67,66 @@ def get_groq_case_client():
         _groq_case_client = Groq(api_key=api_key)
     return _groq_case_client
 
-def generate_case(prompt_template: str = None):
+async def generate_case(prompt_template: str = None):
     """
     Gera um caso de assassinato usando IA via modelo LLaMA 3 70B (Groq).
     Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
     """
     try:
-        # Usa o prompt fornecido ou o template padrão
-        user_prompt = prompt_template or CREATE_CASE_TEMPLATE
+        # Logging detalhado
+        logger.info(f"🔄 Iniciando geração de caso...")
+        logger.info(f"API Key presente: {'GROQ_API_KEY' in os.environ}")
+        api_key = os.getenv("GROQ_API_KEY", "")
+        logger.info(f"API Key length: {len(api_key)}")
         
-        # Verifica se a API key está disponível
-        api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise ValueError("GROQ_API_KEY não encontrada no ambiente")
+        
+        # Usa o prompt fornecido ou o template padrão
+        user_prompt = prompt_template or CREATE_CASE_TEMPLATE
         
         # Obtém o cliente Groq
         client = get_groq_case_client()
         
-        print(f"🔄 Gerando caso com Groq (modelo: llama3-70b-8192)...")
+        logger.info(f"🔄 Gerando caso com Groq (modelo: llama3-70b-8192)...")
         
-        response = client.chat.completions.create(
-            model="llama3-70b-8192",  # Modelo LLaMA 3 70B
-            messages=[
-                {"role": "system", "content": SYSTEM_GAME_MASTER},
-                {"role": "user", "content": user_prompt}
-            ],
-            temperature=0.8,
-            max_tokens=2000,
-            timeout=60.0  # Timeout de 60 segundos
+        response = await asyncio.wait_for(
+            asyncio.to_thread(
+                client.chat.completions.create,
+                model="llama3-70b-8192",
+                messages=[
+                    {"role": "system", "content": SYSTEM_GAME_MASTER},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.8,
+                max_tokens=2000
+            ),
+            timeout=15.0  # Timeout aumentado para 15 segundos
         )
         
         result = response.choices[0].message.content
-        print(f"✅ Caso gerado com sucesso (tamanho: {len(result)} caracteres)")
+        logger.info(f"✅ Caso gerado com sucesso: {len(result)} chars")
         return result
         
+    except asyncio.TimeoutError:
+        logger.error("⏱️ Timeout na API Groq")
+        return generate_fallback_case()
     except Exception as e:
-        print(f"❌ Erro ao gerar caso com Groq: {e}")
-        print(f"   Tipo do erro: {type(e).__name__}")
-        import traceback
-        traceback.print_exc()
-        
-        # Fallback para o método antigo se houver erro
-        try:
-            fallback_result = ai_generate(user_prompt or CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
-            print(f"✅ Usando fallback, resultado gerado (tamanho: {len(fallback_result)} caracteres)")
-            return fallback_result
-        except Exception as e2:
-            print(f"❌ Erro no fallback também: {e2}")
-            # Retorna um caso básico de emergência
-            return json.dumps({
-                "case_id": "FALLBACK",
+        logger.error(f"❌ Erro ao gerar caso: {str(e)}", exc_info=True)
+        return generate_fallback_case()
+
+
+def generate_fallback_case():
+    """Gera um caso básico de fallback"""
+    try:
+        fallback_result = ai_generate(CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
+        logger.info(f"✅ Usando fallback, resultado gerado (tamanho: {len(fallback_result)} caracteres)")
+        return fallback_result
+    except Exception as e2:
+        logger.error(f"❌ Erro no fallback também: {e2}")
+        # Retorna um caso básico de emergência
+        return json.dumps({
+            "case_id": "FALLBACK",
                 "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
                 "historia": "A investigação está em andamento. Reúna pistas e descubra a verdade.",
                 "local_corpo": "Local desconhecido",
@@ -1329,6 +1349,9 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     add_chat_message(room_id, "Sistema", death_message)
     add_chat_message(room_id, "Sistema", clue)
     
+    # Sistema de análise de comportamento (opcional)
+    # analyze_bot_behavior(room_id, killer_id, target_id)
+    
     # Verifica condições de vitória
     win_check = await check_win_conditions(room_id)
     if win_check.get("game_ended"):
@@ -1346,6 +1369,50 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
         "clue": clue,
         "victim": target.get("name", "Jogador")
     }
+
+
+async def process_bot_votes(room_id: str):
+    """
+    Bots votam automaticamente após 2 segundos de uma votação iniciada.
+    Bots votam aleatoriamente ou baseado em lógica simples.
+    """
+    await asyncio.sleep(2)  # Aguarda 2 segundos
+    
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    
+    accused = get_accused_player(room_id)
+    if not accused:
+        return  # Nenhuma votação em andamento
+    
+    players = room.get("players", [])
+    alive_players = [p for p in players if isinstance(p, dict) and p.get("status") != "dead"]
+    
+    for player in alive_players:
+        if isinstance(player, dict):
+            is_bot = player.get("isBot", False) or player.get("is_bot", False)
+            player_id = str(player.get("id") or player.get("name", ""))
+            
+            if is_bot and is_alive(room_id, player_id):
+                try:
+                    # Bot vota aleatoriamente (60% culpado, 40% inocente)
+                    vote = "culpado" if random.random() < 0.6 else "inocente"
+                    
+                    # Registra o voto
+                    submit_vote(room_id, player_id, vote)
+                    
+                    # Notifica sobre o voto do bot
+                    await broadcast(room_id, {
+                        "type": "voto_registrado",
+                        "player_name": player.get("name", "Bot"),
+                        "voto": vote,
+                        "message": f"🤖 {player.get('name', 'Bot')} votou: {vote}"
+                    })
+                    
+                    logger.info(f"Bot {player_id} votou {vote} na votação de {accused}")
+                except Exception as e:
+                    logger.error(f"Erro ao processar voto do bot {player_id}: {e}")
 
 
 async def game_loop(room_id: str):
@@ -1460,7 +1527,7 @@ async def game_loop(room_id: str):
         
         # Chama o motor mestre (Groq) para gerar o caso
         print(f"🔄 Chamando generate_case()...")
-        case_json = generate_case(prompt_dinamico)
+        case_json = await generate_case(prompt_dinamico)
         
         if not case_json:
             raise ValueError("generate_case retornou None ou vazio")
@@ -1705,8 +1772,8 @@ async def game_loop(room_id: str):
             player_id = player_data.get("id", idx) if isinstance(player_data, dict) else idx
             player_identifier = player_data.get("id") or player_name if isinstance(player_data, dict) else player_name
             
-            # Atualiza o turno atual no game_state
-            set_current_turn(room_id, player_identifier)
+            # Atualiza o turno atual no game_state (sempre como string)
+            set_current_turn(room_id, str(player_identifier))
             
             # Não revela se é bot ou humano - todos são suspeitos
             # Envia is_killer apenas para o próprio jogador (frontend filtra)
@@ -1730,7 +1797,7 @@ async def game_loop(room_id: str):
             # Envia também mensagem tipo "turno" para facilitar validação no frontend
             await broadcast(room_id, {
                 "type": "turno",
-                "player_id": player_identifier  # ID usado para comparação no frontend
+                "player_id": str(player_identifier)  # Sempre string para consistência
             })
             
             # Se for bot assassino, pode decidir matar
@@ -2070,6 +2137,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     
                     # Adiciona ao chat
                     add_chat_message(room_id, "Sistema", f"⚖️ {player_identifier} acusou {accused_id} de ser o assassino!")
+                    
+                    # Processa votos automáticos de bots após 2 segundos
+                    asyncio.create_task(process_bot_votes(room_id))
                 
                 elif msg_type == "voto" or msg_type == "vote":
                     # Voto em uma acusação
@@ -2320,20 +2390,46 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     "content": msg
                 })
     except WebSocketDisconnect:
+        logger.info(f"🔌 WebSocket desconectado: {player_identifier} da sala {room_id}")
+        
         if websocket in CONNECTIONS.get(room_id, []):
             CONNECTIONS[room_id].remove(websocket)
         
-        # Remove jogador da lista
+        # Marca jogador como "away" em vez de remover completamente
         room = ROOMS.get(room_id)
         if room:
-            room["players"] = [p for p in room.get("players", []) 
-                             if not (isinstance(p, dict) and (p.get("name") == player_identifier or p.get("email") == user_email))]
+            players = room.get("players", [])
+            disconnected_player = None
             
-            # Notifica todos sobre a remoção
+            for p in players:
+                if isinstance(p, dict):
+                    if p.get("name") == player_identifier or p.get("email") == user_email:
+                        disconnected_player = p
+                        # Marca como desconectado, mas mantém na lista
+                        p["is_connected"] = False
+                        p["disconnect_time"] = time.time()
+                        p["status"] = p.get("status", "alive")  # Mantém status (alive/dead)
+                        break
+            
+            # Se for o turno dele, passa para o próximo
+            current_turn_id = get_current_turn(room_id)
+            if disconnected_player and current_turn_id:
+                player_id_str = str(disconnected_player.get("id") or disconnected_player.get("name", ""))
+                if str(current_turn_id).lower() == player_id_str.lower():
+                    logger.info(f"⏭️ Jogador {player_identifier} desconectou durante seu turno. Passando para próximo.")
+                    # Avança turno (lógica simplificada - pode ser melhorada)
+                    # Por enquanto, apenas notifica
+                    await broadcast(room_id, {
+                        "type": "player_disconnected",
+                        "player": player_identifier,
+                        "message": f"⚠️ {player_identifier} desconectou. Turno será passado."
+                    })
+            
+            # Notifica todos sobre a desconexão (mas não remove)
             await broadcast(room_id, {
                 "type": "players_update",
                 "players": room.get("players", []),
-                "removed_player": player_identifier
+                "disconnected_player": player_identifier
             })
             
             # Envia lista atualizada de jogadores
