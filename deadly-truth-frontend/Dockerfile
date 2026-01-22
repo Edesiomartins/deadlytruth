@@ -1,5 +1,5 @@
 # Dockerfile customizado para evitar problema com NIXPACKS_PATH
-FROM node:23-alpine
+FROM node:22-alpine
 
 # Define variável de ambiente que o Nixpacks espera
 ENV NIXPACKS_PATH=/nix/store
