@@ -69,7 +69,7 @@ def get_groq_case_client():
 
 async def generate_case(prompt_template: str = None):
     """
-    Gera um caso de assassinato usando IA via modelo LLaMA 3.1 13B (Groq).
+    Gera um caso de assassinato usando IA via modelo LLaMA 3.1 8B Instant (Groq).
     Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
     """
     try:
@@ -88,12 +88,12 @@ async def generate_case(prompt_template: str = None):
         # Obtém o cliente Groq
         client = get_groq_case_client()
         
-        logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.1-13b)...")
+        logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.1-8b-instant)...")
         
         response = await asyncio.wait_for(
             asyncio.to_thread(
                 client.chat.completions.create,
-                model="llama-3.1-13b",
+                model="llama-3.1-8b-instant",
                 messages=[
                     {"role": "system", "content": SYSTEM_GAME_MASTER},
                     {"role": "user", "content": user_prompt}
@@ -421,10 +421,10 @@ def ai_generate(prompt: str, system: str = None) -> str:
             return completion.choices[0].message.content or ""
         else:
             # Usa Groq (padrão)
-            print(f"🤖 Usando Groq (Llama 3.1 13B)...")
+            print(f"🤖 Usando Groq (Llama 3.1 8B Instant)...")
         client = get_groq_client()
         completion = client.chat.completions.create(
-            model="llama-3.1-13b",
+            model="llama-3.1-8b-instant",
             messages=messages,
             temperature=1,
             max_completion_tokens=1024,
@@ -1015,7 +1015,7 @@ async def ask_interrogation(room_id: str, req: InterrogationRequest):
     try:
         groq_client = get_groq_case_client()
         response = groq_client.chat.completions.create(
-            model="llama-3.1-13b",  # Modelo LLaMA 3.1 13B
+            model="llama-3.1-8b-instant",  # Modelo LLaMA 3.1 8B Instant
             messages=[
                 {"role": "system", "content": SYSTEM_GAME_MASTER},
                 {"role": "user", "content": prompt}
@@ -1139,7 +1139,7 @@ Exemplo: "Pista encontrada: Fragmentos de tecido vermelho foram encontrados pert
 Responda APENAS com a pista, sem explicações adicionais:"""
         
         response = groq_client.chat.completions.create(
-            model="llama-3.1-13b",
+            model="llama-3.1-8b-instant",
             messages=[
                 {"role": "system", "content": SYSTEM_GAME_MASTER},
                 {"role": "user", "content": prompt}
@@ -1675,7 +1675,7 @@ async def game_loop(room_id: str):
                 logger.error(f"❌ Erro ao parsear JSON do caso: {e}")
                 logger.error(f"   Conteúdo recebido: {case_json[:500]}")
                 # Usa extract_json_from_string como fallback
-                case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+    case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
         elif isinstance(case_json, dict):
             # Já é um dict, usa diretamente
             case_data = case_json
@@ -1814,7 +1814,7 @@ async def game_loop(room_id: str):
     
     # SALVAR NA SALA (Importante para quem entrar depois)
     room["case"] = case_data 
-    
+
     # Atualiza o game_state com o resumo formatado do caso
     case_summary = f"{case_data.get('descricao', '')} {case_data.get('historia', '')}"
     set_case_summary(room_id, case_summary)
@@ -1906,7 +1906,6 @@ async def game_loop(room_id: str):
     logger.info(f"✅ Mensagem 'game_start' enviada com sucesso (case_id: {case_data.get('case_id', 'N/A')})")
 
     # 2. Inicia a sequência de turnos com controle de tempo
-    import time
     game_start_time = time.time()
     game_min_duration = 30 * 60  # 30 minutos em segundos
     game_max_duration = 120 * 60  # 120 minutos em segundos
@@ -2303,7 +2302,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
                     if not is_turn:
                         await websocket.send_text(json.dumps({
-                            "type": "error",
+                            "type": "error", 
                             "msg": turn_error_msg
                         }))
                         continue
@@ -2635,7 +2634,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
         logger.info(f"🔌 WebSocket desconectado: {player_identifier} da sala {room_id}")
         
         if websocket in CONNECTIONS.get(room_id, []):
-            CONNECTIONS[room_id].remove(websocket)
+        CONNECTIONS[room_id].remove(websocket)
         
         # Marca jogador como "away" em vez de remover completamente
         room = ROOMS.get(room_id)
