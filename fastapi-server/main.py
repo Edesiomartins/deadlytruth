@@ -207,7 +207,7 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
+    allow_headers=["*", "Authorization", "Content-Type"],  # ✅ Inclui Authorization explicitamente
     expose_headers=["*"],
     max_age=3600,  # Cache preflight por 1 hora
 )
@@ -228,7 +228,7 @@ async def add_cors_headers(request: Request, call_next):
         else:
             response.headers["Access-Control-Allow-Origin"] = "*"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
         response.headers["Access-Control-Max-Age"] = "3600"
         return response
     
@@ -256,10 +256,11 @@ async def add_cors_headers(request: Request, call_next):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     else:
         # Se não houver origin, permite todas (útil para desenvolvimento)
         response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     
     return response
 
@@ -280,9 +281,10 @@ async def fastapi_http_exception_handler(request: Request, exc: FastAPIHTTPExcep
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     
     return response
 
@@ -302,9 +304,10 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     
     return response
 
@@ -322,9 +325,10 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     return response
 
 
@@ -345,9 +349,10 @@ async def general_exception_handler(request: Request, exc: Exception):
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     else:
         response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     return response
 
 app.include_router(auth_router)
@@ -1526,17 +1531,41 @@ async def game_loop(room_id: str):
         print(f"   Primeiros 10 chars: {api_key[:10]}...")
         
         # Chama o motor mestre (Groq) para gerar o caso
-        print(f"🔄 Chamando generate_case()...")
+        logger.info(f"🔄 Chamando generate_case() para sala {room_id}...")
         case_json = await generate_case(prompt_dinamico)
         
         if not case_json:
             raise ValueError("generate_case retornou None ou vazio")
         
-        if isinstance(case_json, dict):
-            case_json = json.dumps(case_json)
+        logger.info(f"✅ Resposta do MOTOR MESTRE recebida (tamanho: {len(case_json)} caracteres)")
+        logger.debug(f"   Primeiros 300 chars: {case_json[:300]}...")
         
-        print(f"✅ Resposta do MOTOR MESTRE recebida (tamanho: {len(case_json)} caracteres)")
-        print(f"   Primeiros 300 chars: {case_json[:300]}...")
+        # ✅ CORREÇÃO: Parsear a string JSON para um objeto Python ANTES de usar
+        if isinstance(case_json, str):
+            try:
+                # Tenta extrair JSON de markdown se necessário
+                json_str = case_json
+                if '```json' in json_str:
+                    match = re.search(r'```json\s*(.*?)\s*```', json_str, re.DOTALL)
+                    if match:
+                        json_str = match.group(1).strip()
+                        logger.info("📝 JSON extraído de bloco markdown")
+                
+                # Parseia para dict Python
+                case_data = json.loads(json_str)
+                logger.info(f"✅ Caso parseado de string JSON para objeto Python (tipo: {type(case_data)})")
+            except json.JSONDecodeError as e:
+                logger.error(f"❌ Erro ao parsear JSON do caso: {e}")
+                logger.error(f"   Conteúdo recebido: {case_json[:500]}")
+                # Usa extract_json_from_string como fallback
+                case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+        elif isinstance(case_json, dict):
+            # Já é um dict, usa diretamente
+            case_data = case_json
+            logger.info("✅ Caso já é um objeto Python (dict)")
+        else:
+            logger.warning(f"⚠️ Tipo inesperado de case_json: {type(case_json)}")
+            case_data = extract_json_from_string(str(case_json), validate_with_pydantic=CaseData)
         
     except Exception as e:
         print(f"❌ Erro ao chamar generate_case (Motor Mestre): {e}")
@@ -1564,13 +1593,30 @@ async def game_loop(room_id: str):
             "suspeitos": [],
             "evidencias": []
         })
-        print(f"⚠️ Usando caso de fallback (MOTOR MESTRE não funcionou)")
+        logger.warning(f"⚠️ Usando caso de fallback (MOTOR MESTRE não funcionou) para sala {room_id}")
+        # ✅ CORREÇÃO: Parsear o fallback também para dict
+        case_data = json.loads(case_json)
+    
+    # ✅ CORREÇÃO: Garantir que case_data seja sempre um dict Python ANTES de usar
+    if not isinstance(case_data, dict):
+        logger.error(f"❌ case_data não é dict após parse, tipo: {type(case_data)}")
+        if isinstance(case_data, str):
+            try:
+                case_data = json.loads(case_data)
+            except:
+                case_data = extract_json_from_string(case_data, validate_with_pydantic=CaseData)
+        else:
+            case_data = extract_json_from_string(str(case_data), validate_with_pydantic=CaseData)
+    
+    logger.info(f"✅ Caso parseado e validado para sala {room_id} (tipo: {type(case_data)}, case_id: {case_data.get('case_id', 'N/A')})")
     
     # Salva o resumo do caso no game_state (alinhado com a dinâmica: todos são suspeitos, um é assassino)
-    set_case_summary(room_id, case_json)
+    case_summary_text = json.dumps(case_data) if isinstance(case_data, dict) else str(case_data)
+    set_case_summary(room_id, case_summary_text)
     
     # Extrai pistas básicas do texto do caso (linhas que contêm "pista:")
-    for line in case_json.splitlines():
+    case_text = json.dumps(case_data) if isinstance(case_data, dict) else str(case_data)
+    for line in case_text.splitlines():
         if "pista:" in line.lower() or "pista" in line.lower():
             pista_extraida = line.strip()
             if pista_extraida:
@@ -1580,7 +1626,8 @@ async def game_loop(room_id: str):
     frases_importantes = []
     
     try:
-        case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)
+        # ✅ CORREÇÃO: case_data já é um dict Python, não precisa parsear novamente
+        # case_data = extract_json_from_string(case_json, validate_with_pydantic=CaseData)  # REMOVIDO
         
         # 🔍 Extrai pistas automáticas a partir do caso gerado
         historia = case_data.get("historia", "")
@@ -1930,22 +1977,24 @@ async def ws_room(websocket: WebSocket, room_id: str):
     # Adiciona jogador à lista (limite de 12 jogadores)
     room = ROOMS[room_id]
     
-    # Identifica o jogador
-    player_identifier = user_nickname or (user_email.split("@")[0] if user_email else f"Jogador {len(room.get('players', [])) + 1}")
+    # ✅ CORREÇÃO: Garantir que player_identifier seja sempre string
+    player_identifier = str(user_nickname or (user_email.split("@")[0] if user_email else f"Jogador {len(room.get('players', [])) + 1}"))
+    
+    logger.info(f"🔌 WebSocket conectado: {websocket.client.host if websocket.client else 'N/A'}:{websocket.client.port if websocket.client else 'N/A'} para sala {room_id}, player: {player_identifier}")
     
     # Verifica se o jogador já está na lista
     existing_player = None
     for p in room.get("players", []):
         if isinstance(p, dict):
-            if p.get("name") == player_identifier or p.get("id") == player_identifier:
+            if str(p.get("name", "")) == player_identifier or str(p.get("id", "")) == player_identifier:
                 existing_player = p
                 break
     
     # Se não existe, adiciona à lista
     if not existing_player:
         player_data = {
-            "id": player_identifier,
-            "name": player_identifier,
+            "id": str(player_identifier),  # ✅ Garantir que seja string
+            "name": str(player_identifier),  # ✅ Garantir que seja string
             "status": "online",
             "isBot": False,
             "is_bot": False,
@@ -2029,6 +2078,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 msg_type = data.get("type")
                 
                 if msg_type == "start":
+                    logger.info(f"📨 Recebido 'start' de {player_identifier} na sala {room_id}. Iniciando game_loop process.")
                     # Lógica de início manual
                     # Recebe a lista de jogadores (incluindo bots) do frontend
                     players_data = data.get("players", [])
