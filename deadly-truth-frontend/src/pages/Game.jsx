@@ -104,33 +104,35 @@ export default function Game() {
         switch (message.type) {
             case "hello":
                 console.log("👋 Conectado à sala", message);
-                // Extrair seu ID do payload
+                // ✅ CORREÇÃO: Extrair player_id NUMÉRICO do payload
                 if (message.payload?.player_id) {
+                    // player_id agora é numérico (1, 2, 3, ...)
                     setMyPlayerId(String(message.payload.player_id));
-                    console.log("✅ Seu ID:", message.payload.player_id);
+                    console.log("✅ Seu ID numérico:", message.payload.player_id);
                 }
                 // Também pode vir diretamente
                 if (message.player_id) {
                     setMyPlayerId(String(message.player_id));
                     console.log("✅ Seu ID (direto):", message.player_id);
                 }
-                // Pode vir como player_name ou nickname também
-                if (message.player_name && !myPlayerId) {
-                    setMyPlayerId(String(message.player_name));
-                    setMyPlayerName(message.player_name);
-                    console.log("✅ Seu ID (player_name):", message.player_name);
+                // ✅ Salvar também o nome do jogador
+                if (message.payload?.player_name) {
+                    setMyPlayerName(message.payload.player_name);
+                    console.log("✅ Seu nome:", message.payload.player_name);
                 }
                 // Inicializa lista de jogadores se disponível
-                if (message.payload?.players && Array.isArray(message.payload.players)) {
+                if (message.players_list && Array.isArray(message.players_list)) {
+                    setPlayers(message.players_list);
+                } else if (message.payload?.players && Array.isArray(message.payload.players)) {
                     setPlayers(message.payload.players);
                 }
                 // Handler para caso recebido via hello
-                if (message.case) {
-                    setCaso(message.case);
+                if (message.case || message.payload?.case) {
+                    setCaso(message.case || message.payload.case);
                 }
                 // ✅ Se houver current_turn no hello, definir
-                if (message.current_turn || message.current_turn_player_id) {
-                    const turnId = String(message.current_turn || message.current_turn_player_id || "");
+                if (message.current_turn || message.current_turn_player_id || message.payload?.current_turn) {
+                    const turnId = String(message.current_turn || message.current_turn_player_id || message.payload?.current_turn || "");
                     if (turnId) {
                         setCurrentTurnPlayerId(turnId);
                         console.log("🎯 Turno inicial do hello:", turnId);
