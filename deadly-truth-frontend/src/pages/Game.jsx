@@ -368,14 +368,21 @@ export default function Game() {
     };
     
     // ✅ VALIDAR SE É SEU TURNO
-    const isMyTurn = myPlayerId && currentTurnPlayerId && 
-                     String(myPlayerId) === String(currentTurnPlayerId);
+    // Compara tanto por ID quanto por nome
+    const isMyTurn = myPlayerId && currentTurnPlayerId && (
+        String(myPlayerId) === String(currentTurnPlayerId) ||
+        String(myPlayerName) === String(currentTurnPlayerId) ||
+        String(myPlayerId) === String(currentPlayerName) ||
+        String(myPlayerName) === String(currentPlayerName)
+    );
     
     console.log("🔍 DEBUG:", {
         myPlayerId,
+        myPlayerName,
         currentTurnPlayerId,
+        currentPlayerName,
         isMyTurn,
-        comparison: `${myPlayerId} === ${currentTurnPlayerId}`
+        comparison: `${myPlayerId}/${myPlayerName} === ${currentTurnPlayerId}/${currentPlayerName}`
     });
     
     // ✅ ENVIAR MENSAGEM
