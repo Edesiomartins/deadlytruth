@@ -2237,7 +2237,7 @@ async def game_loop(room_id: str):
                 "turnoAtual": str(player_identifier),  # ✅ SEMPRE string e nunca vazio
                 "player": player_name,
                 "player_name": player_name,
-                "player_id": str(player_id),  # ✅ SEMPRE string
+                "player_id": player_id,  # ✅ ID NUMÉRICO (1, 2, 3, ...)
                 "player_identifier": str(player_identifier),  # ✅ SEMPRE string e nunca vazio
                 "turn_index": idx,
                 "time_limit": turn_timeout,  # 1 minuto por turno
