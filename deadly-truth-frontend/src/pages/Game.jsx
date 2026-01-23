@@ -215,26 +215,40 @@ export default function Game() {
                 break;
             
             case "turn_change":
-                console.log("🎯 Turno mudou:", message.current_player);
-                // ✅ TRATAR turn_change - pode vir com current_player (nome) ou player_id
-                if (message.current_player) {
-                    // Buscar o ID do jogador pelo nome
+                console.log("🔄 Mudança de turno:", message.current_player);
+                
+                // ✅ CORREÇÃO: Usar current_player_id (numérico) se disponível
+                if (message.current_player_id !== undefined) {
+                    const turnId = String(message.current_player_id);
+                    setCurrentTurnPlayerId(turnId);
+                    setCurrentPlayerName(message.current_player || "Jogador");
+                    console.log("🎯 Novo turno ID (numérico):", turnId);
+                } else if (message.current_player) {
+                    // Fallback: Buscar o ID do jogador pelo nome
                     const player = players.find(p => 
                         p.name === message.current_player || 
                         p.nickname === message.current_player ||
-                        String(p.id) === String(message.current_player)
+                        String(p.id) === String(message.current_player) ||
+                        String(p.numeric_id) === String(message.current_player)
                     );
                     if (player) {
-                        setCurrentTurnPlayerId(String(player.id || player.name || message.current_player));
+                        // Usar numeric_id se disponível, senão usar id ou name
+                        const playerId = String(player.numeric_id || player.id || player.name || message.current_player);
+                        setCurrentTurnPlayerId(playerId);
                         setCurrentPlayerName(message.current_player);
+                        console.log("🎯 Turno ID encontrado pelo nome:", playerId);
                     } else {
                         // Se não encontrar, usar o nome diretamente
                         setCurrentTurnPlayerId(String(message.current_player));
                         setCurrentPlayerName(message.current_player);
+                        console.warn("⚠️ Jogador não encontrado na lista, usando nome como ID");
                     }
                 }
-                if (message.player_id) {
-                    setCurrentTurnPlayerId(String(message.player_id));
+                
+                if (message.message) {
+                    setSystemMessage(message.message);
+                } else {
+                    setSystemMessage(`🔄 Turno de ${message.current_player || "Jogador"}`);
                 }
                 break;
             

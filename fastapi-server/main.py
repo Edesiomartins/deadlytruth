@@ -938,12 +938,16 @@ async def process_bot_turn(room_id: str):
     # Notifica novo turno
     if room_id in CONNECTIONS:
         next_player = players[room["current_turn"]]
+        # ✅ CORREÇÃO: Extrair player_id NUMÉRICO
+        next_player_id = next_player.get("numeric_id", next_player.get("id", room["current_turn"] + 1))
         for ws in CONNECTIONS[room_id]:
             try:
                 await ws.send_json({
                     "type": "turn_change",
                     "current_player": next_player.get("name"),
-                    "turn_index": room["current_turn"]
+                    "current_player_id": next_player_id,  # ✅ ID NUMÉRICO
+                    "turn_index": room["current_turn"],
+                    "message": f"🎯 Turno de {next_player.get('name')}"
                 })
             except:
                 pass
@@ -1663,11 +1667,22 @@ async def advance_turn_on_disconnect(room_id: str):
     # Atualiza o turno
     room["current_turn"] = next_idx
     next_player = participantes[next_idx]
-    next_player_id = str(next_player.get("id") or next_player.get("name", ""))
+    # ✅ CORREÇÃO: Usar numeric_id se disponível
+    next_player_numeric_id = next_player.get("numeric_id", next_player.get("id", next_idx + 1))
+    next_player_id = str(next_player_numeric_id)
     next_player_name = next_player.get("name", "Jogador")
     
     # Atualiza game_state
     set_current_turn(room_id, next_player_id)
+    
+    # ✅ CORREÇÃO: Enviar turn_change com player_id NUMÉRICO
+    await broadcast(room_id, {
+        "type": "turn_change",
+        "current_player": next_player_name,
+        "current_player_id": next_player_numeric_id,  # ✅ ID NUMÉRICO
+        "turn_index": next_idx,
+        "message": f"⏭️ Turno passado para {next_player_name}"
+    })
     
     # Notifica todos sobre o novo turno
     await broadcast(room_id, {
@@ -1675,7 +1690,7 @@ async def advance_turn_on_disconnect(room_id: str):
         "turnoAtual": next_player_id,
         "player": next_player_name,
         "player_name": next_player_name,
-        "player_id": next_player.get("id"),
+        "player_id": next_player_numeric_id,  # ✅ ID NUMÉRICO
         "player_identifier": next_player_id,
         "turn_index": next_idx,
         "time_limit": 60,
