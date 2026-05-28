@@ -2483,10 +2483,12 @@ async def game_loop(room_id: str):
             init_bot_memory(room_id, p.get("name"), personality=BOT_PERSONALITIES.get(p.get("name"), {}).get("personality", "neutral"))
             logger.info(f"🧠 Memória do Bot {p.get('name')} inicializada na sala {room_id}")
 
+    logger.info(f"🎲 Escolhendo assassino entre {len(participantes)} participantes")
     killer = random.choice(participantes)
     killer["is_killer"] = True
     killer_id = str(killer["id"])
     killer_name = killer.get("name", "Assassino")
+    logger.info(f"🔪 Assassino escolhido internamente: {killer.get('name')} ID={killer.get('id')}")
     room["killer_id"] = killer_id
     set_killer_id(room_id, killer_id)
     flush_killer_to_db(room_id, killer_id)
@@ -2506,7 +2508,6 @@ async def game_loop(room_id: str):
     await broadcast(room_id, {"type": "status", "msg": "O Mestre está tecendo a história..."})
     
     # Gerar o caso com randomização
-    import random
     cenarios = ["Hotel-Cassino", "Mansão", "Praia", "Parque", "Teatro"]
     niveis = ["Iniciante", "Intermediário", "Avançado"]
     
@@ -3486,7 +3487,6 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         
                         if bots_in_room and room.get("game_active", False):
                             # Seleciona um bot aleatório para responder (30% de chance)
-                            import random
                             if random.random() < 0.3:  # 30% de chance de um bot responder
                                 responding_bot = random.choice(bots_in_room)
                                 bot_name = responding_bot.get("name", "Bot")
