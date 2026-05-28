@@ -26,21 +26,21 @@ class Base(DeclarativeBase):
 def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     
-    # Migração: adiciona coluna nickname se não existir
+    # Migrações de tabela de usuários
     try:
         inspector = inspect(engine)
-        columns = [col['name'] for col in inspector.get_columns('users')]
-        
-        if 'nickname' not in columns:
-            print("🔄 Adicionando coluna 'nickname' à tabela 'users'...")
-            with engine.connect() as conn:
-                if DATABASE_URL.startswith('sqlite'):
-                    conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(50)"))
-                else:
-                    # PostgreSQL
-                    conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(50)"))
-                conn.commit()
-            print("✅ Coluna 'nickname' adicionada com sucesso!")
+        users_exists = 'users' in inspector.get_table_names()
+        if users_exists:
+            columns = [col['name'] for col in inspector.get_columns('users')]
+            
+            if 'nickname' not in columns:
+                print("🔄 Adicionando coluna 'nickname' à tabela 'users'...")
+                with engine.connect() as conn:
+                    if DATABASE_URL.startswith('sqlite'):
+                        conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(50)"))
+                    else:
+                        conn.execute(text("ALTER TABLE users ADD COLUMN nickname VARCHAR(50)"))
+                    conn.commit()
+                print("✅ Coluna 'nickname' adicionada com sucesso!")
     except Exception as e:
         print(f"⚠️ Erro ao verificar/adicionar coluna nickname: {e}")
-        # Não falha se a migração não funcionar

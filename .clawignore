@@ -1,0 +1,10 @@
+.claw/
+.claw/sessions/
+node_modules/
+dist/
+build/
+.next/
+coverage/
+*.log
+.env
+.env.*

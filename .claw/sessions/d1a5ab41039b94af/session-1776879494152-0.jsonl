@@ -1,0 +1,3 @@
+{"created_at_ms":1776879494151,"model":"z-ai/glm-4.5-air:free","session_id":"session-1776879494152-0","type":"session_meta","updated_at_ms":1776879494151,"version":1,"workspace_root":"C:\\Users\\Dr. Edesio Martins\\Documents\\PROJETOS\\Deadly-Truth"}
+{"text":"ola","timestamp_ms":1776879503964,"type":"prompt_history"}
+{"message":{"blocks":[{"text":"ola","type":"text"}],"role":"user"},"type":"message"}
