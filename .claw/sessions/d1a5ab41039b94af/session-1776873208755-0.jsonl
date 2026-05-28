@@ -1,7 +1,0 @@
-{"created_at_ms":1776873208754,"model":"z-ai/glm-4.5-air:free","session_id":"session-1776873208755-0","type":"session_meta","updated_at_ms":1776873290504,"version":1,"workspace_root":"C:\\Users\\Dr. Edesio Martins\\Documents\\PROJETOS\\Deadly-Truth"}
-{"text":"ola","timestamp_ms":1776873218216,"type":"prompt_history"}
-{"text":"preciso q verifique um codigo","timestamp_ms":1776873281805,"type":"prompt_history"}
-{"message":{"blocks":[{"text":"ola","type":"text"}],"role":"user"},"type":"message"}
-{"message":{"blocks":[{"text":"Olá! 😊 Como posso ajudar você hoje com o projeto Deadly-Truth?","type":"text"}],"role":"assistant","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":5961,"output_tokens":52}},"type":"message"}
-{"message":{"blocks":[{"text":"preciso q verifique um codigo","type":"text"}],"role":"user"},"type":"message"}
-{"message":{"blocks":[{"text":"Olá! 😊 Claro, posso ajudar a verificar o código. \n\nPelo que vejo, estamos no projeto Deadly-Truth e há alterações recentes no arquivo `fastapi-server/main.py`. \n\nQual código específico você gostaria que eu verificasse? Você pode me dizer:\n\n1. O arquivo completo que quer verificar\n2. Uma parte específica do código\n3. As alterações recentes que estão no diff\n4. Ou algum outro arquivo específico\n\nPor favor, me indique qual código você quer que eu analise.","type":"text"}],"role":"assistant","usage":{"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"input_tokens":5992,"output_tokens":194}},"type":"message"}

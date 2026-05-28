@@ -460,6 +460,19 @@ _openrouter_client = None
 ROOMS = {}  # {room_id: {"case": {...}, "chat": [...], "nivel": "...", "players": [...], "current_turn": int, "game_active": bool}}
 CONNECTIONS = {}  # {room_id: [WebSocket, ...]}
 GAME_EVENTS = {}  # {room_id: {"player_action_event": asyncio.Event, "current_player": int}}
+CONNECTION_PLAYERS = {}  # {room_id: {id(websocket): {"id": str, "name": str}}}
+
+VALID_PHASES = {
+    "lobby",
+    "intro",
+    "investigation",
+    "turn",
+    "interrogation",
+    "defense",
+    "voting",
+    "resolution",
+    "ended",
+}
 
 
 # ======== Funções auxiliares ========
@@ -908,6 +921,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
     
     room = ROOMS[room_id]
     bot_name = current_player.get("name", "Bot")
+    bot_id = str(current_player.get("id") or bot_name)
     
     # Aguarda 2-4 segundos para parecer natural
     await asyncio.sleep(random.uniform(2, 4))
@@ -940,7 +954,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
     add_chat_message(room_id, bot_name, bot_response)
     
     # Verifica se o bot está morto
-    bot_status = get_player_status(room_id, bot_name)
+    bot_status = get_player_status(room_id, bot_id)
     is_bot_dead = bot_status == "dead"
     
     # Envia para todos os jogadores conectados (como mensagem normal de suspeito)
@@ -977,19 +991,20 @@ async def process_bot_interrogation_reply(room_id: str, bot_name: str, question:
         "suspects": case_data.get("suspeitos", [])
     }
     
-    # Identifica informações do bot
-    bot_info = None
-    for p in room.get("players", []):
-        if isinstance(p, dict) and p.get("name") == bot_name:
-            bot_info = p
-            break
+    bot_info = get_player_by_id(room, bot_name)
+    if not bot_info:
+        for p in room.get("players", []):
+            if isinstance(p, dict) and p.get("name") == bot_name:
+                bot_info = p
+                break
             
     bot_is_killer = bot_info.get("is_killer", False) if bot_info else False
+    bot_display_name = bot_info.get("name", bot_name) if bot_info else bot_name
     
     # Formata prompt com o template de interrogatório do prompts.py
     prompt = INTERROGATION_TEMPLATE.format(
         case_summary=json.dumps(context),
-        suspeito=bot_name,
+        suspeito=bot_display_name,
         pergunta=question,
         nivel=room.get("nivel", "Intermediário")
     )
@@ -1011,45 +1026,15 @@ async def process_bot_interrogation_reply(room_id: str, bot_name: str, question:
         if sinais:
             full_reply += f" *(Ações: {sinais})*"
             
-        # Adiciona a resposta ao histórico do chat
-        add_chat_message(room_id, bot_name, full_reply)
-        room.setdefault("chat", []).append({
-            "player": bot_name,
-            "text": full_reply,
-            "timestamp": datetime.now().isoformat()
-        })
-        
         # Registra na consistência do bot
-        record_bot_statement(room_id, bot_name, full_reply, context="interrogation_reply")
-        
-        # Broadcast para todos os jogadores
-        await broadcast(room_id, {
-            "type": "resposta_interrogatorio",
-            "player": bot_name,
-            "message": full_reply,
-            "sinais_nao_verbais": sinais
-        })
+        record_bot_statement(room_id, bot_display_name, full_reply, context="interrogation_reply")
+        await submit_interrogation_result(room_id, str(bot_info.get("id") if bot_info else bot_name), full_reply)
         
     except Exception as e:
         logger.error(f"❌ Erro no interrogatório do bot {bot_name}: {e}")
         fallback_reply = generate_bot_response_fallback(bot_name, context)
         
-        # Adiciona ao chat e faz broadcast
-        add_chat_message(room_id, bot_name, fallback_reply)
-        room.setdefault("chat", []).append({
-            "player": bot_name,
-            "text": fallback_reply,
-            "timestamp": datetime.now().isoformat()
-        })
-        await broadcast(room_id, {
-            "type": "resposta_interrogatorio",
-            "player": bot_name,
-            "message": fallback_reply,
-            "sinais_nao_verbais": "Parece tenso e impaciente." if bot_is_killer else "Sem ações notáveis."
-        })
-        
-    # Limpa estado de interrogatório
-    clear_interrogation(room_id)
+        await submit_interrogation_result(room_id, str(bot_info.get("id") if bot_info else bot_name), fallback_reply)
 
 
 def extract_json_from_string(text, validate_with_pydantic=None):
@@ -1425,10 +1410,15 @@ async def broadcast_players(room_id: str):
             player_id = p.get("id") or p.get("name") or "Jogador"
             player_status = get_player_status(room_id, player_id)
             formatted_players.append({
-                "id": player_id,
+                "id": str(player_id),
                 "name": p.get("name") or player_id,
+                "nickname": p.get("name") or player_id,
+                "numeric_id": p.get("numeric_id"),
                 "status": player_status if player_status != "unknown" else p.get("status", "alive"),
-                "isBot": p.get("isBot") or p.get("is_bot", False)
+                "is_alive": (player_status if player_status != "unknown" else p.get("status", "alive")) == "alive",
+                "isBot": p.get("isBot") or p.get("is_bot", False),
+                "is_bot": p.get("isBot") or p.get("is_bot", False),
+                "is_connected": p.get("is_connected", True),
             })
     
     # Envia para todos
@@ -1436,6 +1426,119 @@ async def broadcast_players(room_id: str):
         "type": "jogadores",
         "players": formatted_players
     })
+
+
+def normalize_players(players):
+    """Normaliza jogadores em uma estrutura única e usa id string como identificador oficial."""
+    normalized = []
+    seen_ids = set()
+    for index, raw in enumerate(players or [], start=1):
+        if isinstance(raw, dict):
+            numeric_id = raw.get("numeric_id") or raw.get("id") or index
+            try:
+                numeric_id = int(numeric_id)
+            except (TypeError, ValueError):
+                numeric_id = index
+            player_id = str(raw.get("id") or numeric_id)
+            if not player_id.strip():
+                player_id = str(index)
+            if player_id in seen_ids:
+                player_id = str(index)
+            name = str(raw.get("name") or raw.get("nickname") or f"Jogador {numeric_id}")
+            status_value = raw.get("status", "alive")
+            status_value = "dead" if status_value == "dead" else "alive"
+            is_bot = bool(raw.get("is_bot") or raw.get("isBot"))
+            is_connected = bool(raw.get("is_connected", not is_bot))
+        else:
+            numeric_id = index
+            player_id = str(index)
+            name = str(raw or f"Jogador {index}")
+            status_value = "alive"
+            is_bot = False
+            is_connected = True
+
+        seen_ids.add(player_id)
+        normalized.append({
+            "id": player_id,
+            "name": name,
+            "numeric_id": numeric_id,
+            "status": status_value,
+            "is_bot": is_bot,
+            "isBot": is_bot,
+            "is_killer": bool(raw.get("is_killer", False)) if isinstance(raw, dict) else False,
+            "is_connected": is_connected,
+            "email": raw.get("email") if isinstance(raw, dict) else None,
+        })
+    return normalized
+
+
+def get_alive_players(room):
+    return [p for p in room.get("players", []) if isinstance(p, dict) and p.get("status") == "alive"]
+
+
+def get_player_by_id(room, player_id):
+    player_id = str(player_id)
+    return next((p for p in room.get("players", []) if str(p.get("id")) == player_id), None)
+
+
+def resolve_player_id(room, identifier):
+    """Resolve nome, id antigo ou numeric_id para o id oficial string."""
+    if identifier is None:
+        return ""
+    ident = str(identifier)
+    for p in room.get("players", []):
+        if not isinstance(p, dict):
+            continue
+        if ident in {str(p.get("id")), str(p.get("name")), str(p.get("numeric_id"))}:
+            return str(p.get("id"))
+    return ident
+
+
+def set_phase(room_id, phase):
+    if phase not in VALID_PHASES:
+        raise ValueError(f"Fase inválida: {phase}")
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    room["phase"] = phase
+    logger.info(f"[GAME_PHASE] room={room_id} phase={phase}")
+
+
+async def broadcast_game_state(room_id):
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    await broadcast(room_id, {
+        "type": "game_state",
+        "phase": room.get("phase", "lobby"),
+        "current_turn_player_id": str(room.get("current_turn_player_id") or ""),
+        "players": room.get("players", []),
+        "active_accusation": room.get("active_accusation"),
+        "active_interrogation": room.get("active_interrogation"),
+    })
+
+
+async def send_private_to_player(room_id, player_id, message):
+    """Entrega mensagem privada a humanos conectados cujo nome/id mapeia para player_id."""
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    target = get_player_by_id(room, player_id)
+    target_names = {str(player_id)}
+    if target:
+        target_names.add(str(target.get("name")))
+    for ws in CONNECTIONS.get(room_id, []):
+        conn = CONNECTION_PLAYERS.get(room_id, {}).get(id(ws), {})
+        if str(conn.get("id")) in target_names or str(conn.get("name")) in target_names:
+            try:
+                await ws.send_text(json.dumps(message))
+            except Exception:
+                pass
+
+
+def _player_public_name(room, player_id):
+    player = get_player_by_id(room, player_id)
+    return player.get("name", str(player_id)) if player else str(player_id)
 
 
 async def send_private_message(room_id: str, player_id: str, message: dict):
@@ -1532,34 +1635,48 @@ async def check_win_conditions(room_id: str) -> dict:
         return {"game_ended": False}
     
     players = room.get("players", [])
-    alive_players = [p for p in players if isinstance(p, dict) and p.get("status") != "dead"]
-    dead_players = [p for p in players if isinstance(p, dict) and p.get("status") == "dead"]
-    
+    alive_players = get_alive_players(room)
+    alive_killers = [p for p in alive_players if p.get("is_killer")]
+    alive_innocents = [p for p in alive_players if not p.get("is_killer")]
     killer = next((p for p in players if isinstance(p, dict) and p.get("is_killer")), None)
-    
-    # Assassino vence se eliminar todos os outros
-    if killer and len(alive_players) == 1 and alive_players[0].get("is_killer"):
+
+    logger.info(
+        f"[WIN_CHECK] room={room_id} alive={len(alive_players)} killers={len(alive_killers)} innocents={len(alive_innocents)}"
+    )
+
+    if not killer:
+        return {"game_ended": False}
+
+    if len(alive_killers) == 0:
+        return {
+            "game_ended": True,
+            "winner": "inocentes",
+            "winner_name": "Inocentes",
+            "reason": "O assassino foi eliminado.",
+            "killer_id": str(killer.get("id")),
+            "killer_name": killer.get("name", "Assassino"),
+        }
+
+    if len(alive_innocents) == 0:
         return {
             "game_ended": True,
             "winner": "assassino",
             "winner_name": killer.get("name", "Assassino"),
-            "reason": "O assassino eliminou todos os outros jogadores!"
+            "reason": "Todos os inocentes foram eliminados.",
+            "killer_id": str(killer.get("id")),
+            "killer_name": killer.get("name", "Assassino"),
         }
-    
-    # Assassino vence se sobreviver até o final (quando restam apenas 2 jogadores)
-    if killer and len(alive_players) == 2:
-        killer_alive = any(p.get("is_killer") for p in alive_players)
-        if killer_alive:
-            return {
-                "game_ended": True,
-                "winner": "assassino",
-                "winner_name": killer.get("name", "Assassino"),
-                "reason": "O assassino sobreviveu até o final!"
-            }
-    
-    # Inocentes vencem se descobrirem o assassino (implementar votação depois)
-    # Por enquanto, retorna False
-    
+
+    if len(alive_killers) >= len(alive_innocents):
+        return {
+            "game_ended": True,
+            "winner": "assassino",
+            "winner_name": killer.get("name", "Assassino"),
+            "reason": "O número de assassinos vivos alcançou o número de inocentes.",
+            "killer_id": str(killer.get("id")),
+            "killer_name": killer.get("name", "Assassino"),
+        }
+
     return {"game_ended": False}
 
 
@@ -1569,7 +1686,11 @@ def is_player_turn(room_id: str, player_identifier: str) -> tuple[bool, str]:
     Retorna (True, "") se for o turno, (False, mensagem_erro) caso contrário.
     ✅ CORREÇÃO: Validação robusta com IDs normalizados e nunca vazios.
     """
-    current_turn_id = get_current_turn(room_id)
+    room = ROOMS.get(room_id)
+    if not room:
+        return (False, "Sala não encontrada.")
+    player_identifier = resolve_player_id(room, player_identifier)
+    current_turn_id = room.get("current_turn_player_id") or get_current_turn(room_id)
     if not current_turn_id:
         logger.warning(f"⚠️ current_turn_id está vazio para sala {room_id}")
         return (True, "")  # Se não há turno definido, permite
@@ -1592,39 +1713,6 @@ def is_player_turn(room_id: str, player_identifier: str) -> tuple[bool, str]:
         logger.info(f"✅ Validação de turno: {p_id} == {c_id} ? True")
         return (True, "")
     
-    # Tenta encontrar pelo nome na lista de players
-    if room_id in ROOMS:
-        room = ROOMS[room_id]
-        players = room.get("players", [])
-        current_player = None
-        requesting_player = None
-        
-        for p in players:
-            if isinstance(p, dict):
-                p_name = str(p.get("name", "")).lower().strip()
-                p_id_from_dict = str(p.get("id", "")).lower().strip()
-                p_numeric_id = str(p.get("numeric_id", "")).strip()
-
-                # Encontra o jogador atual (da vez) — compara também por numeric_id
-                if p_name == current_turn_normalized or p_id_from_dict == current_turn_normalized or p_numeric_id == current_turn_normalized:
-                    current_player = p
-
-                # Encontra o jogador que está fazendo a requisição
-                if p_name == player_identifier_normalized or p_id_from_dict == player_identifier_normalized or p_numeric_id == player_identifier_normalized:
-                    requesting_player = p
-        
-        # Se encontrou ambos e são o mesmo, permite
-        if current_player and requesting_player:
-            current_name = str(current_player.get("name", "")).lower().strip()
-            current_id = str(current_player.get("id", "")).lower().strip()
-            request_name = str(requesting_player.get("name", "")).lower().strip()
-            request_id = str(requesting_player.get("id", "")).lower().strip()
-            
-            if (current_name == request_name or current_id == request_id or 
-                current_name == request_id or current_id == request_name):
-                logger.info(f"✅ Validação de turno (por nome): {p_id} == {c_id} ? True")
-                return (True, "")
-    
     logger.info(f"❌ Validação de turno: {p_id} == {c_id} ? False")
     return (False, f"⛔ Não é sua vez. Aguarde o próximo turno. (Turno atual: {c_id}, Você: {p_id})")
 
@@ -1639,6 +1727,8 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     room = ROOMS.get(room_id)
     if not room:
         return {"success": False, "message": "Sala não encontrada"}
+    killer_id = resolve_player_id(room, killer_id)
+    target_id = resolve_player_id(room, target_id)
     
     # 🔒 Verifica se é o assassino usando game_state
     killer_id_from_state = get_killer_id(room_id)
@@ -1674,11 +1764,7 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
         return {"success": False, "message": "Este jogador já está morto"}
     
     players = room.get("players", [])
-    target = None
-    for p in players:
-        if isinstance(p, dict) and (p.get("id") == target_id or p.get("name") == target_id):
-            target = p
-            break
+    target = get_player_by_id(room, target_id)
     
     if not target:
         return {"success": False, "message": "Alvo não encontrado"}
@@ -1715,6 +1801,7 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     
     await broadcast(room_id, {
         "type": "player_death",
+        "victim_id": str(target_id),
         "victim": target.get("name", "Jogador"),
         "message": death_message,
         "clue": clue
@@ -1742,13 +1829,7 @@ async def kill_player(room_id: str, killer_id: str, target_id: str) -> dict:
     # Verifica condições de vitória
     win_check = await check_win_conditions(room_id)
     if win_check.get("game_ended"):
-        await broadcast(room_id, {
-            "type": "game_end",
-            "winner": win_check.get("winner"),
-            "winner_name": win_check.get("winner_name"),
-            "reason": win_check.get("reason")
-        })
-        room["game_active"] = False
+        await finish_game(room_id, win_check)
     
     return {
         "success": True,
@@ -1929,6 +2010,385 @@ async def process_bot_votes(room_id: str):
     await check_and_process_vote_results(room_id)
 
 
+async def advance_to_next_alive_player(room_id: str):
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    players = room.get("players", [])
+    if not get_alive_players(room):
+        return
+    current_index = int(room.get("current_turn", 0))
+    for step in range(1, len(players) + 1):
+        next_index = (current_index + step) % len(players)
+        candidate = players[next_index]
+        if isinstance(candidate, dict) and candidate.get("status") == "alive":
+            room["current_turn"] = next_index
+            room["current_turn_player_id"] = str(candidate.get("id"))
+            set_current_turn(room_id, str(candidate.get("id")))
+            logger.info(f"[TURN] room={room_id} next_player={candidate.get('id')} name={candidate.get('name')}")
+            break
+    if room_id in GAME_EVENTS:
+        GAME_EVENTS[room_id]["player_action_event"].set()
+
+
+async def finish_game(room_id: str, result: dict):
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+    killer = next((p for p in room.get("players", []) if isinstance(p, dict) and p.get("is_killer")), None)
+    payload = {
+        "type": "game_end",
+        "winner": result.get("winner"),
+        "winner_name": result.get("winner_name"),
+        "reason": result.get("reason"),
+        "killer_id": result.get("killer_id") or (str(killer.get("id")) if killer else ""),
+        "killer_name": result.get("killer_name") or (killer.get("name") if killer else ""),
+    }
+    set_phase(room_id, "ended")
+    room["game_active"] = False
+    await broadcast(room_id, payload)
+    flush_game_end_to_db(room_id)
+    if room_id in GAME_EVENTS:
+        GAME_EVENTS[room_id]["player_action_event"].set()
+
+
+async def submit_interrogation_result(room_id: str, responder_id: str, response_text: str, timed_out: bool = False):
+    room = ROOMS.get(room_id)
+    if not room or not room.get("active_interrogation"):
+        return
+    active = room["active_interrogation"]
+    if str(active.get("target_id")) != str(responder_id):
+        return
+    if timed_out:
+        await broadcast(room_id, {
+            "type": "interrogation_timeout",
+            "message": "O interrogado permaneceu em silêncio.",
+        })
+    target_name = _player_public_name(room, responder_id)
+    add_chat_message(room_id, target_name, response_text)
+    room.setdefault("chat", []).append({
+        "player": target_name,
+        "text": response_text,
+        "timestamp": datetime.now().isoformat(),
+    })
+    await broadcast(room_id, {
+        "type": "interrogation_result",
+        "interrogator_id": active.get("interrogator_id"),
+        "target_id": active.get("target_id"),
+        "question": active.get("question"),
+        "message": response_text,
+        "player": target_name,
+    })
+    await broadcast(room_id, {
+        "type": "resposta_interrogatorio",
+        "player": target_name,
+        "message": response_text,
+    })
+    room["active_interrogation"] = None
+    clear_interrogation(room_id)
+    set_phase(room_id, "turn")
+    await advance_to_next_alive_player(room_id)
+
+
+async def interrogation_timeout_task(room_id: str, target_id: str, started_at: float):
+    await asyncio.sleep(45)
+    room = ROOMS.get(room_id)
+    active = room.get("active_interrogation") if room else None
+    if active and str(active.get("target_id")) == str(target_id) and active.get("created_at") == started_at:
+        logger.info(f"[INTERROGATION] room={room_id} timeout target={target_id}")
+        await submit_interrogation_result(room_id, target_id, "O interrogado permaneceu em silêncio.", timed_out=True)
+
+
+async def start_interrogation_phase(room_id: str, interrogator_id: str, target_id: str, question: str):
+    room = ROOMS.get(room_id)
+    if not room:
+        return {"success": False, "message": "Sala não encontrada."}
+    if room.get("phase") != "turn":
+        return {"success": False, "message": "Interrogatório só pode ser iniciado no turno."}
+    if str(room.get("current_turn_player_id")) != str(interrogator_id):
+        return {"success": False, "message": "Não é sua vez."}
+    target = get_player_by_id(room, target_id)
+    if not target or target.get("status") != "alive":
+        return {"success": False, "message": "Alvo inválido ou morto."}
+    started_at = time.time()
+    room["active_interrogation"] = {
+        "interrogator_id": str(interrogator_id),
+        "target_id": str(target_id),
+        "question": question,
+        "created_at": started_at,
+    }
+    start_interrogation(room_id, str(interrogator_id), str(target_id), question)
+    set_phase(room_id, "interrogation")
+    logger.info(f"[INTERROGATION] room={room_id} interrogator={interrogator_id} target={target_id}")
+    await broadcast(room_id, {
+        "type": "interrogation_started",
+        "phase": "interrogation",
+        "interrogator_id": str(interrogator_id),
+        "target_id": str(target_id),
+        "question": question,
+        "timeout": 45,
+    })
+    await broadcast(room_id, {
+        "type": "interrogatorio_iniciado",
+        "interrogator": str(interrogator_id),
+        "target": str(target_id),
+        "question": question,
+        "message": f"{_player_public_name(room, interrogator_id)} está interrogando {_player_public_name(room, target_id)}.",
+    })
+    if target.get("is_bot"):
+        asyncio.create_task(process_bot_interrogation_reply(room_id, str(target_id), question))
+    else:
+        asyncio.create_task(interrogation_timeout_task(room_id, str(target_id), started_at))
+    return {"success": True}
+
+
+async def start_accusation(room_id: str, accuser_id: str, accused_id: str):
+    room = ROOMS.get(room_id)
+    if not room:
+        return {"success": False, "message": "Sala não encontrada."}
+    if room.get("phase") != "turn":
+        return {"success": False, "message": "Acusação só pode ser feita no turno."}
+    if str(room.get("current_turn_player_id")) != str(accuser_id):
+        return {"success": False, "message": "Não é sua vez."}
+    accused = get_player_by_id(room, accused_id)
+    if not accused or accused.get("status") != "alive":
+        return {"success": False, "message": "Acusado inválido ou morto."}
+    if str(accuser_id) == str(accused_id):
+        return {"success": False, "message": "Você não pode se acusar."}
+    room["active_accusation"] = {
+        "accuser_id": str(accuser_id),
+        "accused_id": str(accused_id),
+        "defense_text": None,
+        "created_at": time.time(),
+    }
+    room["votes"] = {}
+    set_phase(room_id, "defense")
+    message = f"Jogador {_player_public_name(room, accuser_id)} acusou {_player_public_name(room, accused_id)}. O acusado tem direito a defesa."
+    logger.info(f"[ACCUSATION] room={room_id} accuser={accuser_id} accused={accused_id}")
+    await broadcast(room_id, {
+        "type": "accusation_started",
+        "phase": "defense",
+        "accuser_id": str(accuser_id),
+        "accused_id": str(accused_id),
+        "message": message,
+        "defense_timeout": 45,
+    })
+    add_chat_message(room_id, "Sistema", message)
+    if accused.get("is_bot"):
+        asyncio.create_task(bot_defense_task(room_id, str(accused_id), room["active_accusation"]["created_at"]))
+    else:
+        asyncio.create_task(defense_timeout_task(room_id, str(accused_id), room["active_accusation"]["created_at"]))
+    return {"success": True}
+
+
+async def bot_defense_task(room_id: str, accused_id: str, created_at: float):
+    await asyncio.sleep(random.uniform(1.5, 3.0))
+    room = ROOMS.get(room_id)
+    if not room or not room.get("active_accusation") or room["active_accusation"].get("created_at") != created_at:
+        return
+    accused = get_player_by_id(room, accused_id)
+    case_data = room.get("case", {})
+    context = {
+        "case_description": case_data.get("descricao", ""),
+        "case_history": case_data.get("historia", ""),
+        "chat_history": room.get("chat", []),
+        "evidences": get_all_clues_list(room_id),
+        "suspects": case_data.get("suspeitos", []),
+    }
+    defense = await bot_generate_response(
+        accused.get("name", accused_id),
+        context,
+        question="Você foi acusado de ser o assassino. Apresente uma defesa curta e convincente.",
+    )
+    await submit_defense(room_id, accused_id, defense)
+
+
+async def defense_timeout_task(room_id: str, accused_id: str, created_at: float):
+    await asyncio.sleep(45)
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if active and str(active.get("accused_id")) == str(accused_id) and active.get("created_at") == created_at and active.get("defense_text") is None:
+        logger.info(f"[ACCUSATION] room={room_id} defense_timeout accused={accused_id}")
+        await submit_defense(room_id, accused_id, "O acusado permaneceu em silêncio.")
+
+
+async def submit_defense(room_id: str, accused_id: str, defense_text: str):
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if not active or str(active.get("accused_id")) != str(accused_id):
+        return {"success": False, "message": "Nenhuma defesa pendente para este jogador."}
+    active["defense_text"] = defense_text
+    accused_name = _player_public_name(room, accused_id)
+    add_chat_message(room_id, accused_name, defense_text)
+    room.setdefault("chat", []).append({
+        "player": accused_name,
+        "text": defense_text,
+        "timestamp": datetime.now().isoformat(),
+    })
+    await start_voting(room_id)
+    return {"success": True}
+
+
+async def start_voting(room_id: str):
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if not active:
+        return
+    set_phase(room_id, "voting")
+    room["votes"] = {}
+    eligible_voters = [str(p.get("id")) for p in get_alive_players(room)]
+    logger.info(f"[VOTING] room={room_id} accused={active.get('accused_id')} voters={eligible_voters}")
+    await broadcast(room_id, {
+        "type": "voting_started",
+        "phase": "voting",
+        "accused_id": active.get("accused_id"),
+        "accuser_id": active.get("accuser_id"),
+        "defense_text": active.get("defense_text"),
+        "eligible_voters": eligible_voters,
+        "voting_timeout": 30,
+    })
+    await broadcast(room_id, {
+        "type": "votacao_iniciada",
+        "accused": active.get("accused_id"),
+        "accuser": active.get("accuser_id"),
+        "message": f"Votação iniciada contra {_player_public_name(room, active.get('accused_id'))}.",
+    })
+    asyncio.create_task(auto_bot_votes(room_id, active.get("created_at")))
+    asyncio.create_task(voting_timeout_task(room_id, active.get("created_at")))
+
+
+async def auto_bot_votes(room_id: str, accusation_created_at: float):
+    await asyncio.sleep(1.5)
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if not active or active.get("created_at") != accusation_created_at or room.get("phase") != "voting":
+        return
+    accused_id = str(active.get("accused_id"))
+    alive = get_alive_players(room)
+    for player in alive:
+        player_id = str(player.get("id"))
+        if not player.get("is_bot") or player_id in room.get("votes", {}):
+            continue
+        vote = select_bot_vote(
+            room_id=room_id,
+            bot_name=player.get("name", player_id),
+            accused=accused_id,
+            bot_is_killer=bool(player.get("is_killer")),
+            alive_players=[p.get("name") for p in alive],
+        )
+        await register_vote(room_id, player_id, vote)
+
+
+async def voting_timeout_task(room_id: str, accusation_created_at: float):
+    await asyncio.sleep(30)
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if not active or active.get("created_at") != accusation_created_at or room.get("phase") != "voting":
+        return
+    for player in get_alive_players(room):
+        player_id = str(player.get("id"))
+        if player_id not in room.get("votes", {}):
+            room["votes"][player_id] = "abstencao"
+            await broadcast(room_id, {
+                "type": "vote_registered",
+                "player_id": player_id,
+                "vote": "abstencao",
+            })
+    logger.info(f"[VOTING] room={room_id} timeout")
+    await resolve_voting(room_id)
+
+
+async def register_vote(room_id: str, player_id: str, vote: str):
+    room = ROOMS.get(room_id)
+    if not room or room.get("phase") != "voting" or not room.get("active_accusation"):
+        return {"success": False, "message": "Nenhuma votação em andamento."}
+    if vote not in {"culpado", "inocente", "abstencao"}:
+        return {"success": False, "message": "Voto inválido."}
+    player = get_player_by_id(room, player_id)
+    if not player or player.get("status") != "alive":
+        return {"success": False, "message": "Jogadores mortos não votam."}
+    room.setdefault("votes", {})[str(player_id)] = vote
+    logger.info(f"[VOTING] room={room_id} voter={player_id} vote={vote}")
+    await broadcast(room_id, {
+        "type": "vote_registered",
+        "player_id": str(player_id),
+        "vote": vote,
+    })
+    eligible = {str(p.get("id")) for p in get_alive_players(room)}
+    if eligible and eligible.issubset(set(room.get("votes", {}).keys())):
+        await resolve_voting(room_id)
+    return {"success": True}
+
+
+async def resolve_voting(room_id: str):
+    room = ROOMS.get(room_id)
+    active = room.get("active_accusation") if room else None
+    if not active:
+        return
+    set_phase(room_id, "resolution")
+    votes = room.get("votes", {})
+    guilty_votes = sum(1 for v in votes.values() if v == "culpado")
+    innocent_votes = sum(1 for v in votes.values() if v == "inocente")
+    abstentions = sum(1 for v in votes.values() if v == "abstencao")
+    accused_id = str(active.get("accused_id"))
+    accused = get_player_by_id(room, accused_id)
+    was_killer = bool(accused and accused.get("is_killer"))
+    convicted = guilty_votes > (len(get_alive_players(room)) / 2)
+    if convicted and was_killer:
+        message = f"{_player_public_name(room, accused_id)} era o assassino. Os inocentes venceram."
+    elif convicted:
+        accused["status"] = "dead"
+        kill_player_state(room_id, accused_id)
+        message = f"{_player_public_name(room, accused_id)} era inocente e foi eliminado. O jogo continua."
+        await broadcast(room_id, {
+            "type": "player_death",
+            "victim_id": accused_id,
+            "victim": accused.get("name", accused_id),
+            "message": message,
+            "clue": "Nenhuma pista adicional foi revelada pela execução.",
+        })
+    else:
+        message = f"{_player_public_name(room, accused_id)} sobreviveu à votação."
+
+    logger.info(f"[VOTING] room={room_id} result accused={accused_id} guilty={guilty_votes} innocent={innocent_votes} abstentions={abstentions} convicted={convicted}")
+    payload = {
+        "type": "voting_result",
+        "accused_id": accused_id,
+        "guilty_votes": guilty_votes,
+        "innocent_votes": innocent_votes,
+        "abstentions": abstentions,
+        "was_killer": was_killer,
+        "message": message,
+    }
+    await broadcast(room_id, payload)
+    await broadcast(room_id, {
+        "type": "resultado_votacao",
+        "accused": accused_id,
+        "was_killer": was_killer,
+        "guilt_votes": guilty_votes,
+        "innocent_votes": innocent_votes,
+        "abstentions": abstentions,
+        "message": message,
+    })
+    add_chat_message(room_id, "Sistema", message)
+
+    room["active_accusation"] = None
+    room["votes"] = {}
+    if convicted and was_killer:
+        await finish_game(room_id, {
+            "winner": "inocentes",
+            "winner_name": "Inocentes",
+            "reason": "O assassino foi condenado em votação.",
+        })
+        return
+    win_check = await check_win_conditions(room_id)
+    if win_check.get("game_ended"):
+        await finish_game(room_id, win_check)
+        return
+    set_phase(room_id, "turn")
+    await advance_to_next_alive_player(room_id)
+
+
 async def start_game_safe(room_id: str):
     """
     Inicia o jogo com tratamento robusto de erros.
@@ -1974,7 +2434,8 @@ async def game_loop(room_id: str):
         logger.error(f"❌ Sala {room_id} não encontrada no game_loop")
         return
     
-    participantes = room.get("players", [])
+    participantes = normalize_players(room.get("players", []))
+    room["players"] = participantes
     num_jogadores = len(participantes)
     logger.info(f"👥 Número de participantes: {num_jogadores}")
     
@@ -1988,60 +2449,35 @@ async def game_loop(room_id: str):
         return
     
     room["game_active"] = True
+    room["active_accusation"] = None
+    room["active_interrogation"] = None
+    room["votes"] = {}
+    set_phase(room_id, "intro")
     logger.info(f"✅ Jogo ativado para sala {room_id}\n")
     
-    # 🎯 PASSO 1: Randomizar o assassino
-    import random
-    if participantes:
-        # Garante que todos os jogadores tenham estrutura correta
-        for i, p in enumerate(participantes):
-            if isinstance(p, dict):
-                if "status" not in p:
-                    p["status"] = "alive"
-                if "is_killer" not in p:
-                    p["is_killer"] = False
-        
-        # Escolhe um assassino aleatório
-        killer_index = random.randint(0, len(participantes) - 1)
-        killer = participantes[killer_index]
-        
-        if isinstance(killer, dict):
-            killer["is_killer"] = True
-            killer["status"] = "alive"
-            
-            # Envia mensagem privada para o assassino
-            killer_name = killer.get("name", f"Jogador {killer_index + 1}")
-            killer_id = killer.get("id", killer_index) or killer_name
-            
-            # Salva o assassino no game_state
-            set_killer_id(room_id, killer_id)
-            
-            # Registra todos os jogadores no game_state e inicializa memória dos bots
-            for i, p in enumerate(participantes):
-                if isinstance(p, dict):
-                    player_id = p.get("id") or p.get("name") or f"Jogador {i+1}"
-                    register_player(room_id, player_id)
-                    is_bot = p.get("is_bot") or p.get("isBot", False)
-                    if is_bot:
-                        init_bot_memory(room_id, player_id, personality=BOT_PERSONALITIES.get(player_id, {}).get("personality", "neutral"))
-                        logger.info(f"🧠 Memória do Bot {player_id} inicializada na sala {room_id}")
-            
-            # Encontra o WebSocket do assassino e envia mensagem privada
-            if room_id in CONNECTIONS:
-                for ws in CONNECTIONS[room_id]:
-                    try:
-                        # Envia para todos, mas o frontend filtra baseado no player_id
-                        await ws.send_text(json.dumps({
-                            "type": "you_are_killer",
-                            "player_id": killer_id,
-                            "player_name": killer_name,
-                            "message": f"🔪 Você é o ASSASSINO! Seu objetivo é eliminar todos os outros jogadores sem ser descoberto. Você pode matar 1 jogador por rodada durante seu turno.",
-                            "secret": True
-                        }))
-                    except:
-                        pass
-            
-            print(f"🔪 Assassino escolhido: {killer_name} (ID: {killer_id})")
+    for p in participantes:
+        p["is_killer"] = False
+        register_player(room_id, str(p["id"]))
+        if p.get("is_bot"):
+            init_bot_memory(room_id, p.get("name"), personality=BOT_PERSONALITIES.get(p.get("name"), {}).get("personality", "neutral"))
+            logger.info(f"🧠 Memória do Bot {p.get('name')} inicializada na sala {room_id}")
+
+    killer = random.choice(participantes)
+    killer["is_killer"] = True
+    killer_id = str(killer["id"])
+    killer_name = killer.get("name", "Assassino")
+    room["killer_id"] = killer_id
+    set_killer_id(room_id, killer_id)
+    flush_killer_to_db(room_id, killer_id)
+    logger.info(f"[GAME_PHASE] room={room_id} killer_chosen id={killer_id} name={killer_name}")
+    if not killer.get("is_bot"):
+        await send_private_to_player(room_id, killer_id, {
+            "type": "you_are_killer",
+            "player_id": killer_id,
+            "player_name": killer_name,
+            "message": "Você é o ASSASSINO. Elimine os inocentes sem ser condenado.",
+            "secret": True,
+        })
     
     # Inicializa contador de mortes da rodada
     room["kills_this_round"] = 0
@@ -2333,13 +2769,19 @@ async def game_loop(room_id: str):
     game_start_payload = {
         "type": "game_start",
         "status": "game_started",
+        "phase": "intro",
         "case": case_data,  # ✅ Dict Python, não string JSON
         "players": [
             {
-                "id": str(p.get("id") or p.get("name", "")),
+                "id": str(p.get("id")),
                 "nickname": p.get("name", "Jogador"),
-                "is_alive": p.get("status") != "dead",
-                "is_bot": p.get("isBot", False) or p.get("is_bot", False)
+                "name": p.get("name", "Jogador"),
+                "numeric_id": p.get("numeric_id"),
+                "status": p.get("status", "alive"),
+                "is_alive": p.get("status") == "alive",
+                "is_bot": p.get("is_bot", False),
+                "isBot": p.get("is_bot", False),
+                "is_connected": p.get("is_connected", True)
             }
             for p in participantes if isinstance(p, dict)
         ],
@@ -2352,10 +2794,11 @@ async def game_loop(room_id: str):
     await broadcast(room_id, game_start_payload)
     
     logger.info(f"✅ Mensagem 'game_start' enviada com sucesso (case_id: {case_data.get('case_id', 'N/A')})")
+    set_phase(room_id, "investigation")
 
     # 2. Inicia a sequência de turnos com controle de tempo
     game_start_time = time.time()
-    game_min_duration = 30 * 60  # 30 minutos em segundos
+    game_min_duration = 0
     game_max_duration = 120 * 60  # 120 minutos em segundos
     turn_timeout = 60  # 1 minuto por turno
     
@@ -2380,8 +2823,8 @@ async def game_loop(room_id: str):
             room["game_active"] = False
             break
         
-        # Filtra apenas jogadores vivos
-        alive_players = [p for p in participantes if isinstance(p, dict) and p.get("status") != "dead"]
+        participantes = room.get("players", participantes)
+        alive_players = get_alive_players(room)
         if not alive_players:
             break
             
@@ -2409,16 +2852,14 @@ async def game_loop(room_id: str):
         player_name = player_data.get("name", f"Jogador {idx+1}") if isinstance(player_data, dict) else str(player_data)
         is_killer = player_data.get("is_killer", False) if isinstance(player_data, dict) else False
         
-        # ID numérico para o frontend (1, 2, 3...)
-        player_id = player_data.get("numeric_id", idx + 1) if isinstance(player_data, dict) else (idx + 1)
-        player_identifier = str(player_data.get("numeric_id", player_data.get("id", idx + 1))) if isinstance(player_data, dict) else str(idx + 1)
-        
-        # Limpa estados de votações e interrogatórios do turno anterior para segurança
-        clear_vote(room_id)
-        clear_interrogation(room_id)
+        player_identifier = str(player_data.get("id")) if isinstance(player_data, dict) else str(idx + 1)
+        player_id = player_identifier
 
         # Atualiza o turno atual no game_state (sempre como string)
-        set_current_turn(room_id, str(player_identifier))
+        room["current_turn_player_id"] = player_identifier
+        set_current_turn(room_id, player_identifier)
+        flush_turn_to_db(room_id, player_identifier)
+        set_phase(room_id, "turn")
         
         # Verifica se já passou o tempo mínimo
         can_end_game = elapsed_time >= game_min_duration
@@ -2431,10 +2872,11 @@ async def game_loop(room_id: str):
         # Envia início de turno
         turn_payload = {
             "type": "turn_start",
+            "phase": "turn",
             "turnoAtual": str(player_identifier),
             "player": player_name,
             "player_name": player_name,
-            "player_id": player_id,
+            "player_id": str(player_id),
             "player_identifier": str(player_identifier),
             "turn_index": idx,
             "time_limit": turn_timeout,
@@ -2446,6 +2888,7 @@ async def game_loop(room_id: str):
         }
         
         logger.info(f"📤 Enviando turn_start: turnoAtual={turn_payload['turnoAtual']}, player={player_name}")
+        logger.info(f"[TURN] room={room_id} player_id={player_identifier} name={player_name}")
         await broadcast(room_id, turn_payload)
         
         await broadcast(room_id, {
@@ -2458,13 +2901,13 @@ async def game_loop(room_id: str):
             if is_killer:
                 # Bot assassino decide se mata (30% de chance se houver alvos)
                 alive_targets = [p for p in participantes if isinstance(p, dict) and
-                                p.get("status") != "dead" and not p.get("is_killer")]
+                                p.get("status") == "alive" and not p.get("is_killer")]
                 if alive_targets and random.random() < 0.3:
                     # Uses strategy from bot memory
                     target = select_bot_kill_target(room_id, player_name, alive_targets)
                     if target:
-                        target_name = target.get("name") if isinstance(target, dict) else str(target)
-                        result = await kill_player(room_id, player_name, target_name)
+                        target_id = target.get("id") if isinstance(target, dict) else str(target)
+                        result = await kill_player(room_id, player_identifier, target_id)
                         if result.get("success"):
                             await asyncio.sleep(2)  # Pausa dramática
                             
@@ -2503,46 +2946,37 @@ async def game_loop(room_id: str):
             time_update_task = asyncio.create_task(send_time_updates())
             
             try:
-                await asyncio.wait_for(
-                    GAME_EVENTS[room_id]["player_action_event"].wait(),
-                    timeout=turn_timeout  # 1 minuto
-                )
+                while room.get("game_active", False):
+                    wait_timeout = turn_timeout if room.get("phase") == "turn" else 90
+                    await asyncio.wait_for(
+                        GAME_EVENTS[room_id]["player_action_event"].wait(),
+                        timeout=wait_timeout
+                    )
+                    break
                 time_update_task.cancel()  # Cancela atualizações se o jogador agiu
             except asyncio.TimeoutError:
                 time_update_task.cancel()
-                await broadcast(room_id, {
-                    "type": "time_out", 
-                    "player": player_name,
-                    "turn_index": idx,
-                    "message": f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente."
-                })
-                add_chat_message(room_id, "Sistema", f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente.")
+                if room.get("phase") == "turn":
+                    await broadcast(room_id, {
+                        "type": "time_out", 
+                        "player": player_name,
+                        "turn_index": idx,
+                        "message": f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente."
+                    })
+                    add_chat_message(room_id, "Sistema", f"⏰ {player_name} não agiu a tempo. Turno passado automaticamente.")
+                else:
+                    logger.warning(f"[TURN] room={room_id} phase={room.get('phase')} exceeded expected phase timeout; forcing next turn")
+                    set_phase(room_id, "turn")
                 
         # Se o jogador se desconectou durante o turno dele
         if not player_data.get("is_connected", True):
             logger.info(f"⏭️ Turno de {player_name} encerrado devido à desconexão.")
             
         # Verifica condições de vitória após cada ação/timeout
-        elapsed_time = time.time() - game_start_time
-        if elapsed_time >= game_min_duration:
-            win_check = await check_win_conditions(room_id)
-            if win_check.get("game_ended"):
-                await broadcast(room_id, {
-                    "type": "game_end",
-                    "winner": win_check.get("winner"),
-                    "winner_name": win_check.get("winner_name"),
-                    "reason": win_check.get("reason")
-                })
-                break
-        else:
-            # Ainda não pode terminar, informa tempo restante mínimo
-            remaining_min = int((game_min_duration - elapsed_time) / 60)
-            round_number_current = room.get("round_number", 1)
-            if round_number_current == 1 or round_number_current % 5 == 0:  # A cada 5 rodadas ou na primeira
-                await broadcast(room_id, {
-                    "type": "status",
-                    "msg": f"⏳ O jogo precisa durar pelo menos 30 minutos. Tempo mínimo restante: {remaining_min} minutos."
-                })
+        win_check = await check_win_conditions(room_id)
+        if win_check.get("game_ended"):
+            await finish_game(room_id, win_check)
+            break
                 
         # Avança para o próximo jogador
         room["current_turn"] = (idx + 1) % len(participantes)
@@ -2618,12 +3052,14 @@ async def ws_room(websocket: WebSocket, room_id: str):
         # ✅ CORREÇÃO: Criar ID numérico baseado no índice (1, 2, 3, ...)
         player_numeric_id = len(room.get("players", [])) + 1
         player_data = {
-            "id": str(player_identifier),  # ✅ ID string (nome)
+            "id": str(player_numeric_id),
             "name": str(player_identifier),  # ✅ Nome do jogador
             "numeric_id": player_numeric_id,  # ✅ ID NUMÉRICO (1, 2, 3, ...)
-            "status": "online",
+            "status": "alive",
             "isBot": False,
             "is_bot": False,
+            "is_killer": False,
+            "is_connected": True,
             "email": user_email
         }
         if "players" not in room:
@@ -2639,6 +3075,10 @@ async def ws_room(websocket: WebSocket, room_id: str):
             existing_player["numeric_id"] = player_numeric_id or (room.get("players", []).index(existing_player) + 1)
         player_numeric_id = existing_player.get("numeric_id", player_numeric_id)
         logger.info(f"🔄 Jogador {player_identifier} reconectado na sala {room_id} com ID numérico: {player_numeric_id}")
+    CONNECTION_PLAYERS.setdefault(room_id, {})[id(websocket)] = {
+        "id": str(existing_player.get("id") if existing_player else player_data.get("id")),
+        "name": str(player_identifier),
+    }
     
     # Registra o jogador no game_state
     register_player(room_id, player_identifier)
@@ -2711,6 +3151,16 @@ async def ws_room(websocket: WebSocket, room_id: str):
     }))
     
     logger.info(f"✅ Hello enviado com player_id numérico: {player_numeric_id} para {player_identifier}")
+
+    connected_player = existing_player if existing_player else player_data
+    if room.get("game_active") and connected_player and connected_player.get("is_killer") and not connected_player.get("is_bot"):
+        await websocket.send_text(json.dumps({
+            "type": "you_are_killer",
+            "player_id": str(connected_player.get("id")),
+            "player_name": connected_player.get("name", player_identifier),
+            "message": "Você é o ASSASSINO. Elimine os inocentes sem ser condenado.",
+            "secret": True,
+        }))
     
     # Envia atualização de jogadores para sincronizar
     await broadcast(room_id, {
@@ -2740,7 +3190,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     # Recebe a lista de jogadores (incluindo bots) do frontend
                     players_data = data.get("players", [])
                     if players_data:
-                        room["players"] = players_data
+                        room["players"] = normalize_players(players_data)
                         logger.info(f"🎮 Jogadores recebidos: {len(players_data)} ({sum(1 for p in players_data if p.get('isBot')) } bots)")
                     
                     num_atual = len(room.get("players", []))
@@ -2795,7 +3245,8 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                     
                     # Verifica se é o turno do jogador antes de processar
-                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
+                    actor_id = resolve_player_id(room, player_identifier)
+                    is_turn, turn_error_msg = is_player_turn(room_id, actor_id)
                     if not is_turn:
                         await websocket.send_text(json.dumps({
                             "type": "error", 
@@ -2803,7 +3254,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         }))
                         continue
                     
-                    result = await kill_player(room_id, player_identifier, target_id)
+                    result = await kill_player(room_id, actor_id, target_id)
                     
                     if result.get("success"):
                         await websocket.send_text(json.dumps({
@@ -2819,7 +3270,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                 
                 elif msg_type == "acusar" or (msg_type == "action" and data.get("action") == "acusar"):
                     # Ação de acusar um suspeito
-                    accused_id = data.get("target") or data.get("target_id") or data.get("accused")
+                    accused_id = resolve_player_id(room, data.get("target") or data.get("target_id") or data.get("accused"))
                     
                     if not accused_id:
                         await websocket.send_text(json.dumps({
@@ -2836,66 +3287,13 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     else:
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                     
-                    # Verifica se é o turno do jogador
-                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
-                    if not is_turn:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": turn_error_msg
-                        }))
-                        continue
-                    
-                    # Verifica se o acusado está vivo
-                    if get_player_status(room_id, accused_id) != "alive":
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⛔ Você só pode acusar jogadores vivos."
-                        }))
-                        continue
-                    
-                    # Verifica se o jogador não está se acusando
-                    if player_identifier == accused_id:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⛔ Você não pode se acusar."
-                        }))
-                        continue
-                    
-                    # Inicia a votação
-                    start_vote(room_id, accused_id)
-                    
-                    # Avisa a todos que começou a votação
-                    await broadcast(room_id, {
-                        "type": "votacao_iniciada",
-                        "message": f"⚖️ {player_identifier} acusou {accused_id} de ser o assassino!",
-                        "accused": accused_id,
-                        "accuser": player_identifier
-                    })
-                    
-                    # Adiciona ao chat
-                    add_chat_message(room_id, "Sistema", f"⚖️ {player_identifier} acusou {accused_id} de ser o assassino!")
-                    
-                    # Processa votos automáticos de bots após 2 segundos
-                    asyncio.create_task(process_bot_votes(room_id))
+                    actor_id = resolve_player_id(room, player_identifier)
+                    result = await start_accusation(room_id, actor_id, accused_id)
+                    if not result.get("success"):
+                        await websocket.send_text(json.dumps({"type": "error", "msg": result.get("message")}))
                 
                 elif msg_type == "voto" or msg_type == "vote":
-                    # Voto em uma acusação
-                    accused = get_accused_player(room_id)
-                    if not accused:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⛔ Nenhuma votação em andamento."
-                        }))
-                        continue
-                    
                     vote = data.get("value") or data.get("vote")
-                    if vote not in ["culpado", "inocente"]:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⚠️ Voto inválido. Use 'culpado' ou 'inocente'."
-                        }))
-                        continue
-                    
                     # Identifica o jogador atual
                     if user_nickname:
                         player_identifier = user_nickname
@@ -2904,25 +3302,10 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     else:
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                     
-                    # Verifica se o jogador está vivo
-                    if not is_alive(room_id, player_identifier):
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⛔ Jogadores mortos não votam."
-                        }))
-                        continue
-                    
-                    # Registra o voto
-                    submit_vote(room_id, player_identifier, vote)
-                    
-                    # Confirma o voto
-                    await websocket.send_text(json.dumps({
-                        "type": "vote_registered",
-                        "message": f"✅ Seu voto ({vote}) foi registrado!"
-                    }))
-                    
-                    # Apura resultados se todos votaram
-                    await check_and_process_vote_results(room_id)
+                    actor_id = resolve_player_id(room, player_identifier)
+                    result = await register_vote(room_id, actor_id, vote)
+                    if not result.get("success"):
+                        await websocket.send_text(json.dumps({"type": "error", "msg": result.get("message")}))
 
                 elif msg_type == "pass_turn" or msg_type == "passar_vez":
                     # Identifica o jogador atual
@@ -2934,7 +3317,8 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                         
                     # Verifica se é o turno do jogador
-                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
+                    actor_id = resolve_player_id(room, player_identifier)
+                    is_turn, turn_error_msg = is_player_turn(room_id, actor_id)
                     if not is_turn:
                         await websocket.send_text(json.dumps({
                             "type": "error",
@@ -2947,7 +3331,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         GAME_EVENTS[room_id]["player_action_event"].set()
 
                 elif msg_type == "interrogar":
-                    target_id = data.get("target") or data.get("target_id")
+                    target_id = resolve_player_id(room, data.get("target") or data.get("target_id"))
                     question_text = data.get("question")
                     
                     if not target_id or not question_text:
@@ -2965,53 +3349,18 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     else:
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                         
-                    # Verifica se é o turno do jogador
-                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
-                    if not is_turn:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": turn_error_msg
-                        }))
+                    actor_id = resolve_player_id(room, player_identifier)
+                    result = await start_interrogation_phase(room_id, actor_id, target_id, question_text)
+                    if not result.get("success"):
+                        await websocket.send_text(json.dumps({"type": "error", "msg": result.get("message")}))
                         continue
-                        
-                    # Verifica se o alvo está vivo
-                    if get_player_status(room_id, target_id) != "alive":
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": "⛔ Você só pode interrogar suspeitos vivos."
-                        }))
-                        continue
-                        
-                    # Inicia interrogatório
-                    start_interrogation(room_id, player_identifier, target_id, question_text)
-                    
-                    # Adiciona ao chat geral
-                    add_chat_message(room_id, player_identifier, f"🔍 (Interrogando {target_id}) {question_text}")
+
+                    add_chat_message(room_id, actor_id, f"🔍 (Interrogando {target_id}) {question_text}")
                     room.setdefault("chat", []).append({
-                        "player": player_identifier,
+                        "player": _player_public_name(room, actor_id),
                         "text": f"🔍 (Interrogando {target_id}) {question_text}",
                         "timestamp": datetime.now().isoformat()
                     })
-                    
-                    # Avisa todos na sala
-                    await broadcast(room_id, {
-                        "type": "interrogatorio_iniciado",
-                        "interrogator": player_identifier,
-                        "target": target_id,
-                        "question": question_text,
-                        "message": f"🔍 {player_identifier} está interrogando {target_id}!"
-                    })
-                    
-                    # Verifica se o alvo é um bot
-                    is_bot_target = False
-                    for p in room.get("players", []):
-                        if isinstance(p, dict) and (str(p.get("id")) == str(target_id) or str(p.get("name")) == str(target_id)):
-                            if p.get("isBot") or p.get("is_bot"):
-                                is_bot_target = True
-                                break
-                                
-                    if is_bot_target:
-                        asyncio.create_task(process_bot_interrogation_reply(room_id, target_id, question_text))
 
                 elif msg_type == "resposta_interrogatorio":
                     # Identifica o jogador atual
@@ -3022,10 +3371,12 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     else:
                         player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
                         
-                    interrogator, target_id, question = get_interrogated_player(room_id)
+                    actor_id = resolve_player_id(room, player_identifier)
+                    active_interrogation = room.get("active_interrogation")
+                    target_id = active_interrogation.get("target_id") if active_interrogation else None
                     
                     # Verifica se este jogador é de fato o alvo do interrogatório ativo
-                    if not target_id or str(target_id).lower() != str(player_identifier).lower():
+                    if not target_id or str(target_id) != str(actor_id):
                         await websocket.send_text(json.dumps({
                             "type": "error",
                             "msg": "⛔ Você não é o alvo do interrogatório ativo no momento."
@@ -3040,23 +3391,17 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         }))
                         continue
                         
-                    # Adiciona ao chat geral
-                    add_chat_message(room_id, player_identifier, response_text)
-                    room.setdefault("chat", []).append({
-                        "player": player_identifier,
-                        "text": response_text,
-                        "timestamp": datetime.now().isoformat()
-                    })
-                    
-                    # Avisa todos
-                    await broadcast(room_id, {
-                        "type": "resposta_interrogatorio",
-                        "player": player_identifier,
-                        "message": response_text
-                    })
-                    
-                    # Limpa o estado
-                    clear_interrogation(room_id)
+                    await submit_interrogation_result(room_id, actor_id, response_text)
+
+                elif msg_type == "defesa_acusacao":
+                    actor_id = resolve_player_id(room, player_identifier)
+                    defense_text = data.get("message") or data.get("text")
+                    if not defense_text:
+                        await websocket.send_text(json.dumps({"type": "error", "msg": "⛔ A defesa não pode ser vazia."}))
+                        continue
+                    result = await submit_defense(room_id, actor_id, defense_text)
+                    if not result.get("success"):
+                        await websocket.send_text(json.dumps({"type": "error", "msg": result.get("message")}))
                 
                 elif msg_type == "message" or msg_type == "action":
                     # Processa mensagem de chat ou ação do jogador
@@ -3074,7 +3419,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
                             player_identifier = sender_label
                     
                     # Verifica se o jogador está morto
-                    if not is_alive(room_id, player_identifier):
+                    actor_id = resolve_player_id(room, player_identifier)
+                    actor_player = get_player_by_id(room, actor_id)
+                    if not actor_player or actor_player.get("status") != "alive":
                         await websocket.send_text(json.dumps({
                             "type": "error",
                             "msg": "Você está morto e não pode mais interagir!"
@@ -3098,7 +3445,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         print(f"⚠️ room_id inválido ao adicionar mensagem: {room_id}")
                     
                     # Verifica se o jogador está morto
-                    is_dead = get_player_status(room_id, player_identifier) == "dead"
+                    is_dead = bool(actor_player and actor_player.get("status") == "dead")
                     
                     # Broadcast para todos os jogadores (sem indicar se é bot ou humano)
                     await broadcast(room_id, {
@@ -3195,6 +3542,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
         
         if websocket in CONNECTIONS.get(room_id, []):
             CONNECTIONS[room_id].remove(websocket)
+        CONNECTION_PLAYERS.get(room_id, {}).pop(id(websocket), None)
         
         # Marca jogador como "away" em vez de remover completamente
         room = ROOMS.get(room_id)
@@ -3240,6 +3588,8 @@ async def ws_room(websocket: WebSocket, room_id: str):
             del CONNECTIONS[room_id]
             if room_id in GAME_EVENTS:
                 del GAME_EVENTS[room_id]
+            if room_id in CONNECTION_PLAYERS:
+                del CONNECTION_PLAYERS[room_id]
             room["game_active"] = False
 
 

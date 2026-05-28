@@ -39,6 +39,9 @@ export default function Game() {
     const [accuserPlayerName, setAccuserPlayerName] = useState("");
     const [hasVoted, setHasVoted] = useState(false);
     const [endgameData, setEndgameData] = useState(null);
+    const [activeAccusation, setActiveAccusation] = useState(null);
+    const [defenseInput, setDefenseInput] = useState("");
+    const [votingResult, setVotingResult] = useState(null);
     
     // ✅ NOVOS ESTADOS PARA O SISTEMA DE INTERROGATORIO
     const [showInterrogateModal, setShowInterrogateModal] = useState(false);
@@ -50,6 +53,19 @@ export default function Game() {
     const messagesEndRef = useRef(null);
     const turnTimerRef = useRef(null);
     const gameTimerRef = useRef(null);
+
+    const normalizePlayer = (player) => ({
+        ...player,
+        id: String(player?.id ?? player?.numeric_id ?? player?.name ?? ""),
+        numeric_id: player?.numeric_id,
+        name: player?.name || player?.nickname || String(player?.id ?? ""),
+        nickname: player?.nickname || player?.name || String(player?.id ?? ""),
+        status: player?.status === "dead" ? "dead" : "alive",
+        is_bot: Boolean(player?.is_bot || player?.isBot),
+        isBot: Boolean(player?.is_bot || player?.isBot),
+    });
+
+    const normalizePlayers = (list) => Array.isArray(list) ? list.map(normalizePlayer) : [];
 
     const scrollToBottom = () => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -69,6 +85,14 @@ export default function Game() {
     useEffect(() => {
         scrollToBottom();
     }, [messages]);
+
+    useEffect(() => {
+        if (!myPlayerId || !players.length) return;
+        const me = players.find((p) => String(p.id) === String(myPlayerId));
+        if (me?.status) {
+            setPlayerStatus(me.status);
+        }
+    }, [players, myPlayerId]);
     
     // ✅ CONECTAR AO WEBSOCKET
     useEffect(() => {
@@ -137,9 +161,9 @@ export default function Game() {
                 }
                 // Inicializa lista de jogadores se disponível
                 if (message.players_list && Array.isArray(message.players_list)) {
-                    setPlayers(message.players_list);
+                    setPlayers(normalizePlayers(message.players_list));
                 } else if (message.payload?.players && Array.isArray(message.payload.players)) {
-                    setPlayers(message.payload.players);
+                    setPlayers(normalizePlayers(message.payload.players));
                 }
                 // Handler para caso recebido via hello
                 if (message.case || message.payload?.case) {
@@ -159,9 +183,9 @@ export default function Game() {
                 console.log("🎮 Jogo iniciado!");
                 setCaso(message.case || message.payload?.case);
                 setPistas([]);
-                setPlayers(message.players || []);
+                setPlayers(normalizePlayers(message.players || []));
                 setGameActive(true);
-                setGameState("playing");
+                setGameState(message.phase || "intro");
                 
                 // ✅ Definir current_turn_player_id
                 const currentTurnId = String(message.current_turn_player_id || message.turnoAtual || "");
@@ -177,6 +201,9 @@ export default function Game() {
             
             case "turn_start":
                 console.log("🎯 Novo turno:", message.player_name);
+                setGameState(message.phase || "turn");
+                setActiveAccusation(null);
+                setVotingActive(false);
                 
                 // ✅ CRÍTICO: Usar player_id, não turnoAtual
                 const newTurnoId = String(message.player_id || message.turnoAtual || message.player_identifier || "");
@@ -323,8 +350,8 @@ export default function Game() {
                 setSystemMessage("🔪 VOCÊ É O ASSASSINO! Mate seus inimigos sem ser descoberto.");
                 // Atualiza lista de alvos vivos
                 const allPlayers = players.length > 0 ? players : (message.players || []);
-                const alive = allPlayers.filter(p => 
-                    p.is_alive && String(p.id) !== String(myPlayerId)
+                const alive = normalizePlayers(allPlayers).filter(p => 
+                    p.status === "alive" && String(p.id) !== String(myPlayerId)
                 );
                 setAlivePlayersForKill(alive);
                 break;
@@ -362,11 +389,12 @@ export default function Game() {
             case "jogadores":
                 console.log("👥 Jogadores atualizados:", message.players);
                 if (Array.isArray(message.players)) {
-                    setPlayers(message.players);
+                    const normalized = normalizePlayers(message.players);
+                    setPlayers(normalized);
                     // ✅ ATUALIZAR LISTA DE ALVOS SE FOR ASSASSINO
                     if (isKiller) {
-                        const alive = message.players.filter(p => 
-                            p.is_alive && String(p.id) !== String(myPlayerId)
+                        const alive = normalized.filter(p => 
+                            p.status === "alive" && String(p.id) !== String(myPlayerId)
                         );
                         setAlivePlayersForKill(alive);
                     }
@@ -387,9 +415,102 @@ export default function Game() {
                     setCanEndGame(message.can_end_game);
                 }
                 break;
+
+            case "game_state":
+                setGameState(message.phase || "turn");
+                if (message.current_turn_player_id) {
+                    setCurrentTurnPlayerId(String(message.current_turn_player_id));
+                }
+                if (Array.isArray(message.players)) {
+                    setPlayers(normalizePlayers(message.players));
+                }
+                if (message.active_accusation) {
+                    setActiveAccusation(message.active_accusation);
+                }
+                if (message.active_interrogation) {
+                    setActiveInterrogation({
+                        interrogator: message.active_interrogation.interrogator_id,
+                        target: message.active_interrogation.target_id,
+                        question: message.active_interrogation.question,
+                    });
+                }
+                break;
+
+            case "interrogation_started":
+                setGameState("interrogation");
+                setActiveInterrogation({
+                    interrogator: message.interrogator_id,
+                    target: message.target_id,
+                    question: message.question
+                });
+                setSystemMessage(`Interrogatório iniciado contra ${message.target_id}.`);
+                break;
+
+            case "interrogation_timeout":
+                setMessages(prev => [...prev, {
+                    id: Date.now() + Math.random(),
+                    player: "SISTEMA",
+                    text: message.message || "O interrogado permaneceu em silêncio.",
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                break;
+
+            case "interrogation_result":
+                setGameState("turn");
+                setActiveInterrogation(null);
+                setMessages(prev => [...prev, {
+                    id: Date.now() + Math.random(),
+                    player: "SISTEMA",
+                    text: `🔍 Resposta de ${message.player || message.target_id}: "${message.message}"`,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                setSystemMessage(`Interrogatório de ${message.player || message.target_id} concluído.`);
+                break;
+
+            case "accusation_started":
+                setGameState("defense");
+                setVotingActive(false);
+                setHasVoted(false);
+                setActiveAccusation({
+                    accuser_id: message.accuser_id,
+                    accused_id: message.accused_id,
+                    defense_text: null
+                });
+                setAccusedPlayerId(String(message.accused_id));
+                setAccusedPlayerName(String(message.accused_id));
+                setAccuserPlayerName(String(message.accuser_id));
+                setSystemMessage(message.message || `Acusação iniciada contra ${message.accused_id}.`);
+                break;
+
+            case "voting_started":
+                setGameState("voting");
+                setVotingActive(true);
+                setHasVoted(false);
+                setActiveAccusation({
+                    accuser_id: message.accuser_id,
+                    accused_id: message.accused_id,
+                    defense_text: message.defense_text
+                });
+                setAccusedPlayerId(String(message.accused_id));
+                setAccusedPlayerName(String(message.accused_id));
+                setAccuserPlayerName(String(message.accuser_id));
+                setMessages(prev => [...prev, {
+                    id: Date.now() + Math.random(),
+                    player: "SISTEMA",
+                    text: `⚖️ Defesa: ${message.defense_text || "Sem defesa."}`,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                break;
             
             case "votacao_iniciada":
                 console.log("⚖️ Votação iniciada:", message.accused);
+                setGameState("voting");
                 setAccusedPlayerId(message.accused);
                 setAccusedPlayerName(message.accused);
                 setAccuserPlayerName(message.accuser);
@@ -411,9 +532,28 @@ export default function Game() {
                 break;
                 
             case "vote_registered":
-                console.log("✅ Seu voto foi registrado com sucesso!");
-                setHasVoted(true);
-                setSystemMessage(message.message || "Seu voto foi registrado!");
+                console.log("✅ Voto registrado:", message.player_id, message.vote);
+                if (String(message.player_id) === String(myPlayerId) || !message.player_id) {
+                    setHasVoted(true);
+                    setSystemMessage(message.message || `Seu voto (${message.vote || ""}) foi registrado!`);
+                }
+                break;
+
+            case "voting_result":
+                setGameState("resolution");
+                setVotingActive(false);
+                setActiveAccusation(null);
+                setHasVoted(false);
+                setVotingResult(message);
+                setSystemMessage(message.message);
+                setMessages(prev => [...prev, {
+                    id: Date.now() + Math.random(),
+                    player: "SISTEMA",
+                    text: `${message.message} (${message.guilty_votes} culpado, ${message.innocent_votes} inocente, ${message.abstentions} abstenções)`,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
                 break;
                 
             case "resultado_votacao":
@@ -423,6 +563,8 @@ export default function Game() {
                 setAccusedPlayerName("");
                 setAccuserPlayerName("");
                 setHasVoted(false);
+                setActiveAccusation(null);
+                setVotingResult(message);
                 setSystemMessage(message.message);
                 setMessages(prev => [...prev, {
                     id: Date.now() + Math.random(),
@@ -460,11 +602,15 @@ export default function Game() {
 
             case "game_end":
                 console.log("🏆 Fim de jogo:", message.winner_name, message.reason);
+                setGameState("ended");
+                setGameActive(false);
                 setVotingActive(false);
                 setEndgameData({
                     winner: message.winner,
                     winner_name: message.winner_name,
-                    reason: message.reason
+                    reason: message.reason,
+                    killer_id: message.killer_id,
+                    killer_name: message.killer_name
                 });
                 setSystemMessage(`🏆 Fim de Jogo! Vencedor: ${message.winner_name || message.winner}. ${message.reason || ""}`);
                 break;
@@ -479,14 +625,8 @@ export default function Game() {
         }
     };
     
-    // ✅ VALIDAR SE É SEU TURNO
-    // Compara tanto por ID quanto por nome
-    const isMyTurn = myPlayerId && currentTurnPlayerId && (
-        String(myPlayerId) === String(currentTurnPlayerId) ||
-        String(myPlayerName) === String(currentTurnPlayerId) ||
-        String(myPlayerId) === String(currentPlayerName) ||
-        String(myPlayerName) === String(currentPlayerName)
-    );
+    const isMyTurn = Boolean(myPlayerId && currentTurnPlayerId && String(myPlayerId) === String(currentTurnPlayerId));
+    const actionsLocked = gameState === "ended" || Boolean(endgameData);
     
     console.log("🔍 DEBUG:", {
         myPlayerId,
@@ -502,7 +642,7 @@ export default function Game() {
         console.log("📤 Tentando enviar mensagem");
         console.log("   playerStatus:", playerStatus);
         
-        if (playerStatus === "dead") {
+        if (actionsLocked || playerStatus === "dead") {
             console.warn("💀 Você está morto!");
             setSystemMessage("💀 Você está morto e não pode mais falar no chat!");
             return;
@@ -531,7 +671,7 @@ export default function Game() {
 
     // ✅ PASSAR A VEZ
     const handlePassTurn = () => {
-        if (!isMyTurn) return;
+        if (!isMyTurn || gameState !== "turn" || actionsLocked) return;
         if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
         
         ws.current.send(JSON.stringify({
@@ -542,8 +682,8 @@ export default function Game() {
 
     // ✅ INICIAR INTERROGATÓRIO (CLICK NO BOTÃO)
     const handleInterrogateClick = (targetId) => {
-        if (!isMyTurn) {
-            setSystemMessage("❌ Não é sua vez!");
+        if (!isMyTurn || gameState !== "turn" || actionsLocked) {
+            setSystemMessage("❌ Esta ação só fica disponível no seu turno.");
             return;
         }
         setInterrogatedTarget(targetId);
@@ -610,8 +750,8 @@ export default function Game() {
             return;
         }
         
-        if (!isMyTurn) {
-            setSystemMessage("❌ Não é sua vez!");
+        if (!isMyTurn || gameState !== "turn" || actionsLocked) {
+            setSystemMessage("❌ Esta ação só fica disponível no seu turno.");
             return;
         }
         
@@ -643,8 +783,8 @@ export default function Game() {
     const handleAccuse = (targetId) => {
         console.log("⚖️ Tentando acusar:", targetId);
         
-        if (!isMyTurn) {
-            setSystemMessage("❌ Não é sua vez!");
+        if (!isMyTurn || gameState !== "turn" || actionsLocked) {
+            setSystemMessage("❌ Esta ação só fica disponível no seu turno.");
             return;
         }
         
@@ -682,6 +822,23 @@ export default function Game() {
         
         setHasVoted(true);
         setSystemMessage(`🗳️ Você votou: ${voteValue}`);
+    };
+
+    const submitAccusationDefense = () => {
+        if (!defenseInput.trim()) {
+            setSystemMessage("⚠️ A defesa não pode ser vazia.");
+            return;
+        }
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+            setSystemMessage("❌ Não conectado ao servidor");
+            return;
+        }
+        ws.current.send(JSON.stringify({
+            type: "defesa_acusacao",
+            message: defenseInput.trim()
+        }));
+        setDefenseInput("");
+        setSystemMessage("✅ Defesa enviada.");
     };
 
     if (loading) {
@@ -742,21 +899,20 @@ export default function Game() {
                                     </>
                                 )}
                                 <span className="text-xs text-mediumGray">•</span>
+                                <span className="text-xs text-offWhite/70 font-roboto">
+                                    Fase: <span className="text-accentRed font-semibold">{gameState}</span>
+                                </span>
+                                <span className="text-xs text-mediumGray">•</span>
                                 <div className="flex items-center gap-2">
                                     <p className="text-xs text-offWhite/70 font-roboto">
                                         🕐 {Math.floor(gameElapsedTime / 60)}:{(gameElapsedTime % 60).toString().padStart(2, '0')} / {Math.floor(gameTimeRemaining / 60)}:{(gameTimeRemaining % 60).toString().padStart(2, '0')} restante
                                     </p>
-                                    {!canEndGame && (
-                                        <span className="text-xs text-yellow-400 font-roboto">
-                                            (Mín: 30min)
-                                        </span>
-                                    )}
                                 </div>
                             </div>
                         </div>
                         
                         <div className="flex items-center gap-2">
-                            {isMyTurn && (
+                            {isMyTurn && gameState === "turn" && !actionsLocked && (
                                 <button 
                                     onClick={handlePassTurn}
                                     className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 border border-green-600/40 rounded-lg text-green-400 text-sm font-semibold tracking-wide transition-all font-roboto flex items-center gap-2 shadow-md hover:scale-[1.02]"
@@ -863,7 +1019,7 @@ export default function Game() {
                                                         <span>{p.nickname || p.name || p.id || `Jogador ${idx + 1}`}</span>
                                                         {(p.id === currentTurnPlayerId || p.name === currentTurnPlayerId) && <span>🎯</span>}
                                                         {p.is_bot && <span>🤖</span>}
-                                                        {isMyTurn && (String(p.id) !== String(myPlayerId) && p.name !== myPlayerName) && (
+                                                        {isMyTurn && gameState === "turn" && !actionsLocked && (String(p.id) !== String(myPlayerId)) && (
                                                             <div className="ml-auto flex items-center gap-1.5">
                                                                 <button 
                                                                     onClick={() => handleInterrogateClick(p.id || p.name)}
@@ -907,7 +1063,7 @@ export default function Game() {
                         })()}
                         
                         {/* ✅ BOTÃO DE MATAR - APENAS SE FOR ASSASSINO E SEU TURNO */}
-                        {isKiller && isMyTurn && alivePlayersForKill.length > 0 && (
+                        {isKiller && isMyTurn && gameState === "turn" && !actionsLocked && alivePlayersForKill.length > 0 && (
                             <div className="mt-4 pt-4 border-t border-accentRed/30">
                                 <h3 className="text-xs font-bold text-accentRed/70 uppercase tracking-wider font-roboto mb-2">
                                     🔪 Matar Jogador
@@ -1178,6 +1334,49 @@ export default function Game() {
                 </div>
             )}
 
+            {/* ⚖️ PAINEL DE DEFESA DA ACUSAÇÃO */}
+            {gameState === "defense" && activeAccusation && (
+                <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center">
+                    <div className="bg-darkGray border-2 border-accentRed rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl">
+                        <h2 className="text-2xl font-bold text-white font-cinzel tracking-wider text-center mb-4">
+                            ⚖️ Defesa da Acusação
+                        </h2>
+                        <div className="bg-charcoalBlack/60 border border-accentRed/20 rounded-lg p-5 mb-6 text-center">
+                            <p className="text-sm text-offWhite font-roboto">
+                                <strong className="text-accentRed">{activeAccusation.accuser_id}</strong> acusou <strong className="text-white">{activeAccusation.accused_id}</strong>.
+                            </p>
+                        </div>
+                        {String(myPlayerId) === String(activeAccusation.accused_id) ? (
+                            <div className="space-y-4">
+                                <p className="text-xs text-yellow-400 text-center font-roboto font-semibold">
+                                    Você foi acusado. Apresente sua defesa antes da votação.
+                                </p>
+                                <textarea
+                                    value={defenseInput}
+                                    onChange={(e) => setDefenseInput(e.target.value)}
+                                    placeholder="Minha defesa..."
+                                    rows={4}
+                                    className="w-full px-3 py-2 bg-charcoalBlack border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto"
+                                />
+                                <button
+                                    onClick={submitAccusationDefense}
+                                    className="w-full px-4 py-3 bg-gradient-to-r from-primaryRed to-accentRed hover:from-accentRed hover:to-lightRed text-white rounded-lg font-bold font-roboto transition-all"
+                                >
+                                    Enviar Defesa
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="text-center p-5 bg-gray-800/40 border border-gray-700/50 rounded-lg">
+                                <div className="animate-spin h-6 w-6 border-2 border-accentRed border-t-transparent rounded-full mx-auto mb-3"></div>
+                                <p className="text-sm text-gray-400 font-roboto">
+                                    Aguardando defesa de <strong className="text-white">{activeAccusation.accused_id}</strong>...
+                                </p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
             {/* ✅ MODAL DE VOTAÇÃO EM ANDAMENTO */}
             {votingActive && (
                 <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center">
@@ -1202,6 +1401,11 @@ export default function Game() {
                             <p className="text-sm font-roboto text-offWhite leading-relaxed">
                                 <strong className="text-accentRed font-semibold">{accuserPlayerName}</strong> acusou formalmente <strong className="text-white font-semibold">{accusedPlayerName}</strong> de ser o Assassino!
                             </p>
+                            {activeAccusation?.defense_text && (
+                                <p className="text-xs text-lightGray font-roboto mt-3 italic">
+                                    Defesa: "{activeAccusation.defense_text}"
+                                </p>
+                            )}
                         </div>
                         
                         {playerStatus === "dead" ? (
@@ -1277,6 +1481,11 @@ export default function Game() {
                             <p className="text-sm text-offWhite/80 font-roboto leading-relaxed italic">
                                 "{endgameData.reason}"
                             </p>
+                            {endgameData.killer_name && (
+                                <p className="text-sm text-accentRed font-roboto mt-4">
+                                    Assassino: <strong>{endgameData.killer_name}</strong>
+                                </p>
+                            )}
                         </div>
                         
                         <button 

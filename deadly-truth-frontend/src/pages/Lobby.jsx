@@ -9,7 +9,7 @@ export default function Lobby() {
   const [nicknameInput, setNicknameInput] = useState("");
   
   const [players, setPlayers] = useState([
-    { id: 1, name: user?.nickname || user?.email?.split('@')[0] || "Você", status: "online", role: "Detective", isBot: false },
+    { id: "1", name: user?.nickname || user?.email?.split('@')[0] || "Você", numeric_id: 1, status: "alive", role: "Detective", isBot: false, is_bot: false },
   ]);
   
   const [ws, setWs] = useState(null);
@@ -90,11 +90,13 @@ export default function Lobby() {
           // Recebe lista atualizada de jogadores do servidor
           if (data.players && Array.isArray(data.players)) {
             const updatedPlayers = data.players.map((p, idx) => ({
-              id: idx + 1,
+              id: String(p.id ?? idx + 1),
               name: p.name || p.id || `Jogador ${idx + 1}`,
-              status: p.status || "online",
+              numeric_id: p.numeric_id ?? idx + 1,
+              status: p.status === "dead" ? "dead" : "alive",
               role: p.role || "Suspeito",
-              isBot: p.isBot || p.is_bot || false
+              isBot: p.isBot || p.is_bot || false,
+              is_bot: p.isBot || p.is_bot || false
             }));
             setPlayers(updatedPlayers);
           }
@@ -104,11 +106,13 @@ export default function Lobby() {
           // Atualiza a lista de jogadores com a lista do servidor
           if (data.players && Array.isArray(data.players)) {
             const updatedPlayers = data.players.map((p, idx) => ({
-              id: idx + 1,
+              id: String(p.id ?? idx + 1),
               name: p.name || p.id || `Jogador ${idx + 1}`,
-              status: p.status || "online",
+              numeric_id: p.numeric_id ?? idx + 1,
+              status: p.status === "dead" ? "dead" : "alive",
               role: p.role || "Suspeito",
-              isBot: p.isBot || p.is_bot || false
+              isBot: p.isBot || p.is_bot || false,
+              is_bot: p.isBot || p.is_bot || false
             }));
             setPlayers(updatedPlayers);
             
@@ -142,11 +146,13 @@ export default function Lobby() {
           // Sincroniza lista de jogadores ao conectar
           if (data.players_list && Array.isArray(data.players_list)) {
             const syncedPlayers = data.players_list.map((p, idx) => ({
-              id: idx + 1,
+              id: String(p.id ?? idx + 1),
               name: p.name || p.id || `Jogador ${idx + 1}`,
-              status: p.status || "online",
+              numeric_id: p.numeric_id ?? idx + 1,
+              status: p.status === "dead" ? "dead" : "alive",
               role: p.role || "Suspeito",
-              isBot: p.isBot || p.is_bot || false
+              isBot: p.isBot || p.is_bot || false,
+              is_bot: p.isBot || p.is_bot || false
             }));
             setPlayers(syncedPlayers);
           }
@@ -217,7 +223,14 @@ export default function Lobby() {
     
     const startMessage = {
       type: "start",
-      players: players
+      players: players.map((player, idx) => ({
+        ...player,
+        id: String(player.id ?? idx + 1),
+        numeric_id: player.numeric_id ?? idx + 1,
+        status: player.status === "dead" ? "dead" : "alive",
+        isBot: Boolean(player.isBot || player.is_bot),
+        is_bot: Boolean(player.isBot || player.is_bot)
+      }))
     };
     
     console.log("🎮 Enviando comando para iniciar jogo:", startMessage);
@@ -257,11 +270,13 @@ export default function Lobby() {
     const randomRole = botRoles[Math.floor(Math.random() * botRoles.length)];
 
     const newBot = {
-      id: players.length + 1,
+      id: String(players.length + 1),
       name: randomName,
-      status: "online",
+      numeric_id: players.length + 1,
+      status: "alive",
       role: randomRole,
-      isBot: true
+      isBot: true,
+      is_bot: true
     };
 
     setPlayers([...players, newBot]);
@@ -308,11 +323,13 @@ export default function Lobby() {
       const randomRole = botRoles[Math.floor(Math.random() * botRoles.length)];
       
       newBots.push({
-        id: players.length + i + 1,
+        id: String(players.length + i + 1),
         name: randomName,
-        status: "online",
+        numeric_id: players.length + i + 1,
+        status: "alive",
         role: randomRole,
-        isBot: true
+        isBot: true,
+        is_bot: true
       });
       
       // Adiciona mensagem de cada bot no chat
@@ -386,7 +403,7 @@ export default function Lobby() {
                       <span className="text-white font-bold text-sm font-roboto">{player.name[0]}</span>
                     </div>
                     <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-charcoalBlack ${
-                      player.status === 'online' ? 'bg-green-500' : 'bg-agedGold'
+                      player.status === 'alive' ? 'bg-green-500' : 'bg-agedGold'
                     }`}></div>
                   </div>
                   
