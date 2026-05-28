@@ -961,10 +961,13 @@ def extract_json_from_string(text, validate_with_pydantic=None):
         match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
         if match:
             json_content = match.group(1).strip()
-            parsed = json.loads(json_content)
         else:
-            # Tentar json.loads() direto
-            parsed = json.loads(text.strip())
+            json_content = text.strip()
+            
+        # Limpar zeros à esquerda de números inteiros para evitar erros de sintaxe JSON
+        json_content = re.sub(r'([:\s,\[])0+(\d+)', r'\1\2', json_content)
+        
+        parsed = json.loads(json_content)
         
         # Validar com Pydantic se fornecido
         if validate_with_pydantic:
@@ -1974,6 +1977,9 @@ async def game_loop(room_id: str):
                     if match:
                         json_str = match.group(1).strip()
                         logger.info("📝 JSON extraído de bloco markdown")
+                
+                # Limpar zeros à esquerda de números inteiros para evitar erros de sintaxe JSON
+                json_str = re.sub(r'([:\s,\[])0+(\d+)', r'\1\2', json_str)
                 
                 # Parseia para dict Python
                 case_data = json.loads(json_str)

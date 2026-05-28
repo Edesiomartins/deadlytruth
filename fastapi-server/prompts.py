@@ -21,6 +21,7 @@ CREATE_CASE_TEMPLATE = """
 - Crie uma "descricao" curta e impactante do caso (2-3 frases).
 - Crie uma "historia" detalhada do crime, incluindo contexto, motivação e detalhes da cena (4-6 frases).
 [SAÍDA] Responda estritamente em JSON com os campos: case_id, nivel, cenario, descricao, historia, culpado_id, jogadores, pistas_iniciais, local_corpo, arma_crime, suspeitos, evidencias, timeline, hipoteses_iniciais.
+IMPORTANTE: IDs numéricos (como case_id, culpado_id) no JSON devem ser inteiros normais sem zeros à esquerda (ex: 1, 2 e NÃO 001, 02) ou então strings válidas (ex: "001").
 """
 
 
