@@ -208,3 +208,33 @@ def clear_vote(room_id: str):
     if room_id in game_states:
         game_states[room_id]["accused_player"] = None
         game_states[room_id]["votes"] = {}
+
+
+# ======== Sistema de Interrogatório ========
+
+def start_interrogation(room_id: str, interrogator: str, target_id: str, question: str):
+    """Inicia um interrogatório na sala"""
+    if room_id not in game_states:
+        game_states[room_id] = {"case_summary": "", "clues": [], "chat_history": []}
+    game_states[room_id]["interrogator"] = interrogator
+    game_states[room_id]["interrogated_player"] = target_id
+    game_states[room_id]["interrogation_question"] = question
+
+
+def get_interrogated_player(room_id: str) -> tuple:
+    """Retorna (interrogator, target_id, question) do interrogatório ativo"""
+    if room_id not in game_states:
+        return (None, None, None)
+    return (
+        game_states[room_id].get("interrogator"),
+        game_states[room_id].get("interrogated_player"),
+        game_states[room_id].get("interrogation_question")
+    )
+
+
+def clear_interrogation(room_id: str):
+    """Limpa o interrogatório atual"""
+    if room_id in game_states:
+        game_states[room_id]["interrogator"] = None
+        game_states[room_id]["interrogated_player"] = None
+        game_states[room_id]["interrogation_question"] = None

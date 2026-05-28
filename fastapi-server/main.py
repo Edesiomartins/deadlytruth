@@ -51,7 +51,10 @@ from game_state import (
     get_vote_result,
     get_accused_player,
     all_votes_in,
-    clear_vote
+    clear_vote,
+    start_interrogation,
+    get_interrogated_player,
+    clear_interrogation
 )
 
 # Persistence layer
@@ -954,6 +957,101 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
                 pass
 
 
+async def process_bot_interrogation_reply(room_id: str, bot_name: str, question: str):
+    """Gera resposta de interrogatório para o bot usando a API da IA e limpa o estado de interrogatório."""
+    # Pausa dramática para parecer mais natural (1.5 a 3 segundos)
+    await asyncio.sleep(random.uniform(1.5, 3.0))
+    
+    room = ROOMS.get(room_id)
+    if not room:
+        return
+        
+    case_data = room.get("case", {})
+    context = {
+        "case_description": case_data.get("descricao", ""),
+        "case_history": case_data.get("historia", ""),
+        "case_location": case_data.get("local_corpo", ""),
+        "case_weapon": case_data.get("arma_crime", ""),
+        "chat_history": room.get("chat", []),
+        "evidences": get_all_clues_list(room_id),
+        "suspects": case_data.get("suspeitos", [])
+    }
+    
+    # Identifica informações do bot
+    bot_info = None
+    for p in room.get("players", []):
+        if isinstance(p, dict) and p.get("name") == bot_name:
+            bot_info = p
+            break
+            
+    bot_is_killer = bot_info.get("is_killer", False) if bot_info else False
+    
+    # Formata prompt com o template de interrogatório do prompts.py
+    prompt = INTERROGATION_TEMPLATE.format(
+        case_summary=json.dumps(context),
+        suspeito=bot_name,
+        pergunta=question,
+        nivel=room.get("nivel", "Intermediário")
+    )
+    
+    try:
+        # Chama a geração de IA usando o motor configurado
+        response_text = await generate_case(prompt)
+        
+        # Faz o parse da resposta JSON retornada
+        parsed = parse_interrogation_response(response_text)
+        reply = parsed.get("resposta", "Não tenho nada a declarar.")
+        sinais = parsed.get("sinais_nao_verbais", "")
+        
+        # Se for o assassino e a IA não gerou sinais nervosos, insere por padrão para dar pistas
+        if bot_is_killer and (not sinais or "não" in sinais.lower() or "nenhum" in sinais.lower()):
+            sinais = "Desvia o olhar com inquietação e limpa o suor das mãos."
+            
+        full_reply = f"{reply}"
+        if sinais:
+            full_reply += f" *(Ações: {sinais})*"
+            
+        # Adiciona a resposta ao histórico do chat
+        add_chat_message(room_id, bot_name, full_reply)
+        room.setdefault("chat", []).append({
+            "player": bot_name,
+            "text": full_reply,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # Registra na consistência do bot
+        record_bot_statement(room_id, bot_name, full_reply, context="interrogation_reply")
+        
+        # Broadcast para todos os jogadores
+        await broadcast(room_id, {
+            "type": "resposta_interrogatorio",
+            "player": bot_name,
+            "message": full_reply,
+            "sinais_nao_verbais": sinais
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Erro no interrogatório do bot {bot_name}: {e}")
+        fallback_reply = generate_bot_response_fallback(bot_name, context)
+        
+        # Adiciona ao chat e faz broadcast
+        add_chat_message(room_id, bot_name, fallback_reply)
+        room.setdefault("chat", []).append({
+            "player": bot_name,
+            "text": fallback_reply,
+            "timestamp": datetime.now().isoformat()
+        })
+        await broadcast(room_id, {
+            "type": "resposta_interrogatorio",
+            "player": bot_name,
+            "message": fallback_reply,
+            "sinais_nao_verbais": "Parece tenso e impaciente." if bot_is_killer else "Sem ações notáveis."
+        })
+        
+    # Limpa estado de interrogatório
+    clear_interrogation(room_id)
+
+
 def extract_json_from_string(text, validate_with_pydantic=None):
     """Extrai JSON válido de uma string com blocos markdown ```json...```"""
     try:
@@ -1712,7 +1810,22 @@ async def check_and_process_vote_results(room_id: str):
                 room["game_active"] = False
                 clear_room_state(room_id)
             else:
-                resultado_msg += f"\n❌ {accused} era inocente. O jogo continua..."
+                resultado_msg += f"\n❌ {accused} era inocente e foi eliminado. O jogo continua..."
+                
+                # Elimina o jogador no estado
+                kill_player_state(room_id, accused)
+                for p in room.get("players", []):
+                    if isinstance(p, dict) and (str(p.get("id")) == str(accused) or str(p.get("name")) == str(accused)):
+                        p["status"] = "dead"
+                        
+                # Avisa a todos sobre a eliminação
+                await broadcast(room_id, {
+                    "type": "player_death",
+                    "victim": accused,
+                    "message": f"💀 {accused} foi eliminado pelo tribunal (era inocente)!",
+                    "clue": "Nenhuma pista adicional gerada pelo erro do tribunal."
+                })
+                
                 await broadcast(room_id, {
                     "type": "resultado_votacao",
                     "message": resultado_msg,
@@ -1722,6 +1835,17 @@ async def check_and_process_vote_results(room_id: str):
                     "innocent_votes": inoc
                 })
                 clear_vote(room_id)
+                
+                # Verifica condições de vitória após eliminação
+                win_check = await check_win_conditions(room_id)
+                if win_check.get("game_ended"):
+                    await broadcast(room_id, {
+                        "type": "game_end",
+                        "winner": win_check.get("winner"),
+                        "winner_name": win_check.get("winner_name"),
+                        "reason": win_check.get("reason")
+                    })
+                    room["game_active"] = False
         else:
             resultado_msg += "\n🔄 A maioria votou 'inocente'. O jogo continua..."
             await broadcast(room_id, {
@@ -1740,6 +1864,11 @@ async def check_and_process_vote_results(room_id: str):
             "text": resultado_msg,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # Avança o turno automaticamente
+        if room_id in GAME_EVENTS:
+            logger.info(f"🗳️ Votação concluída na sala {room_id}. Avançando o turno.")
+            GAME_EVENTS[room_id]["player_action_event"].set()
 
 
 async def process_bot_votes(room_id: str):
@@ -2284,6 +2413,10 @@ async def game_loop(room_id: str):
         player_id = player_data.get("numeric_id", idx + 1) if isinstance(player_data, dict) else (idx + 1)
         player_identifier = str(player_data.get("numeric_id", player_data.get("id", idx + 1))) if isinstance(player_data, dict) else str(idx + 1)
         
+        # Limpa estados de votações e interrogatórios do turno anterior para segurança
+        clear_vote(room_id)
+        clear_interrogation(room_id)
+
         # Atualiza o turno atual no game_state (sempre como string)
         set_current_turn(room_id, str(player_identifier))
         
@@ -2790,6 +2923,140 @@ async def ws_room(websocket: WebSocket, room_id: str):
                     
                     # Apura resultados se todos votaram
                     await check_and_process_vote_results(room_id)
+
+                elif msg_type == "pass_turn" or msg_type == "passar_vez":
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
+                        
+                    # Verifica se é o turno do jogador
+                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
+                    if not is_turn:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": turn_error_msg
+                        }))
+                        continue
+                        
+                    logger.info(f"⏭️ Jogador {player_identifier} passou a vez na sala {room_id}")
+                    if room_id in GAME_EVENTS:
+                        GAME_EVENTS[room_id]["player_action_event"].set()
+
+                elif msg_type == "interrogar":
+                    target_id = data.get("target") or data.get("target_id")
+                    question_text = data.get("question")
+                    
+                    if not target_id or not question_text:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você precisa especificar quem está interrogando e qual é a pergunta."
+                        }))
+                        continue
+                        
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
+                        
+                    # Verifica se é o turno do jogador
+                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
+                    if not is_turn:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": turn_error_msg
+                        }))
+                        continue
+                        
+                    # Verifica se o alvo está vivo
+                    if get_player_status(room_id, target_id) != "alive":
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você só pode interrogar suspeitos vivos."
+                        }))
+                        continue
+                        
+                    # Inicia interrogatório
+                    start_interrogation(room_id, player_identifier, target_id, question_text)
+                    
+                    # Adiciona ao chat geral
+                    add_chat_message(room_id, player_identifier, f"🔍 (Interrogando {target_id}) {question_text}")
+                    room.setdefault("chat", []).append({
+                        "player": player_identifier,
+                        "text": f"🔍 (Interrogando {target_id}) {question_text}",
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    # Avisa todos na sala
+                    await broadcast(room_id, {
+                        "type": "interrogatorio_iniciado",
+                        "interrogator": player_identifier,
+                        "target": target_id,
+                        "question": question_text,
+                        "message": f"🔍 {player_identifier} está interrogando {target_id}!"
+                    })
+                    
+                    # Verifica se o alvo é um bot
+                    is_bot_target = False
+                    for p in room.get("players", []):
+                        if isinstance(p, dict) and (str(p.get("id")) == str(target_id) or str(p.get("name")) == str(target_id)):
+                            if p.get("isBot") or p.get("is_bot"):
+                                is_bot_target = True
+                                break
+                                
+                    if is_bot_target:
+                        asyncio.create_task(process_bot_interrogation_reply(room_id, target_id, question_text))
+
+                elif msg_type == "resposta_interrogatorio":
+                    # Identifica o jogador atual
+                    if user_nickname:
+                        player_identifier = user_nickname
+                    elif user_email:
+                        player_identifier = user_email.split("@")[0]
+                    else:
+                        player_identifier = player_identifier or f"Jogador {len(room.get('players', []))}"
+                        
+                    interrogator, target_id, question = get_interrogated_player(room_id)
+                    
+                    # Verifica se este jogador é de fato o alvo do interrogatório ativo
+                    if not target_id or str(target_id).lower() != str(player_identifier).lower():
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ Você não é o alvo do interrogatório ativo no momento."
+                        }))
+                        continue
+                        
+                    response_text = data.get("message") or data.get("text")
+                    if not response_text:
+                        await websocket.send_text(json.dumps({
+                            "type": "error",
+                            "msg": "⛔ A resposta não pode ser vazia."
+                        }))
+                        continue
+                        
+                    # Adiciona ao chat geral
+                    add_chat_message(room_id, player_identifier, response_text)
+                    room.setdefault("chat", []).append({
+                        "player": player_identifier,
+                        "text": response_text,
+                        "timestamp": datetime.now().isoformat()
+                    })
+                    
+                    # Avisa todos
+                    await broadcast(room_id, {
+                        "type": "resposta_interrogatorio",
+                        "player": player_identifier,
+                        "message": response_text
+                    })
+                    
+                    # Limpa o estado
+                    clear_interrogation(room_id)
                 
                 elif msg_type == "message" or msg_type == "action":
                     # Processa mensagem de chat ou ação do jogador
@@ -2806,15 +3073,6 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         if not player_identifier:
                             player_identifier = sender_label
                     
-                    # ⛔ Verifica se é o turno do jogador
-                    is_turn, turn_error_msg = is_player_turn(room_id, player_identifier)
-                    if not is_turn:
-                        await websocket.send_text(json.dumps({
-                            "type": "error",
-                            "msg": turn_error_msg
-                        }))
-                        continue
-                    
                     # Verifica se o jogador está morto
                     if not is_alive(room_id, player_identifier):
                         await websocket.send_text(json.dumps({
@@ -2823,8 +3081,6 @@ async def ws_room(websocket: WebSocket, room_id: str):
                         }))
                         continue
                     
-                    if room_id in GAME_EVENTS:
-                        GAME_EVENTS[room_id]["player_action_event"].set()
                     message_text = data.get("text") or data.get("content", "Realizou uma ação")
                     
                     # Adiciona ao histórico do chat da sala (sem indicar se é bot ou humano)

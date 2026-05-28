@@ -40,6 +40,13 @@ export default function Game() {
     const [hasVoted, setHasVoted] = useState(false);
     const [endgameData, setEndgameData] = useState(null);
     
+    // ✅ NOVOS ESTADOS PARA O SISTEMA DE INTERROGATORIO
+    const [showInterrogateModal, setShowInterrogateModal] = useState(false);
+    const [interrogatedTarget, setInterrogatedTarget] = useState(null);
+    const [questionInput, setQuestionInput] = useState("");
+    const [activeInterrogation, setActiveInterrogation] = useState(null); // { interrogator, target, question }
+    const [interrogationResponseInput, setInterrogationResponseInput] = useState("");
+    
     const messagesEndRef = useRef(null);
     const turnTimerRef = useRef(null);
     const gameTimerRef = useRef(null);
@@ -427,6 +434,30 @@ export default function Game() {
                 }]);
                 break;
 
+            case "interrogatorio_iniciado":
+                console.log("🔍 Interrogatório iniciado:", message);
+                setActiveInterrogation({
+                    interrogator: message.interrogator,
+                    target: message.target,
+                    question: message.question
+                });
+                setSystemMessage(message.message || `Interrogatório contra ${message.target} iniciado!`);
+                break;
+
+            case "resposta_interrogatorio":
+                console.log("🔍 Resposta do interrogatório:", message);
+                setActiveInterrogation(null);
+                setMessages(prev => [...prev, {
+                    id: Date.now() + Math.random(),
+                    player: "SISTEMA",
+                    text: `🔍 Resposta de ${message.player}: "${message.message}"`,
+                    dead: false,
+                    system: true,
+                    time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+                }]);
+                setSystemMessage(`Interrogatório de ${message.player} concluído!`);
+                break;
+
             case "game_end":
                 console.log("🏆 Fim de jogo:", message.winner_name, message.reason);
                 setVotingActive(false);
@@ -469,13 +500,11 @@ export default function Game() {
     // ✅ ENVIAR MENSAGEM
     const handleSendMessage = () => {
         console.log("📤 Tentando enviar mensagem");
-        console.log("   isMyTurn:", isMyTurn);
-        console.log("   myPlayerId:", myPlayerId);
-        console.log("   currentTurnPlayerId:", currentTurnPlayerId);
+        console.log("   playerStatus:", playerStatus);
         
-        if (!isMyTurn) {
-            console.warn("⏳ Não é sua vez!");
-            setSystemMessage("⏳ Aguarde sua vez!");
+        if (playerStatus === "dead") {
+            console.warn("💀 Você está morto!");
+            setSystemMessage("💀 Você está morto e não pode mais falar no chat!");
             return;
         }
         
@@ -498,6 +527,73 @@ export default function Game() {
         
         setMessageInput("");
         console.log("✅ Mensagem enviada");
+    };
+
+    // ✅ PASSAR A VEZ
+    const handlePassTurn = () => {
+        if (!isMyTurn) return;
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) return;
+        
+        ws.current.send(JSON.stringify({
+            type: "pass_turn"
+        }));
+        setSystemMessage("⏭️ Você passou a vez!");
+    };
+
+    // ✅ INICIAR INTERROGATÓRIO (CLICK NO BOTÃO)
+    const handleInterrogateClick = (targetId) => {
+        if (!isMyTurn) {
+            setSystemMessage("❌ Não é sua vez!");
+            return;
+        }
+        setInterrogatedTarget(targetId);
+        setQuestionInput("");
+        setShowInterrogateModal(true);
+    };
+
+    // ✅ ENVIAR PERGUNTA DO INTERROGATÓRIO
+    const submitInterrogation = () => {
+        if (!interrogatedTarget || !questionInput.trim()) {
+            setSystemMessage("⚠️ Digite uma pergunta válida.");
+            return;
+        }
+        
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+            setSystemMessage("❌ Não conectado ao servidor");
+            return;
+        }
+        
+        ws.current.send(JSON.stringify({
+            type: "interrogar",
+            target: interrogatedTarget,
+            question: questionInput.trim()
+        }));
+        
+        setShowInterrogateModal(false);
+        setInterrogatedTarget(null);
+        setQuestionInput("");
+        setSystemMessage("🔍 Pergunta enviada!");
+    };
+
+    // ✅ ENVIAR RESPOSTA AO INTERROGATÓRIO (QUANDO INTERROGADO)
+    const submitInterrogationResponse = () => {
+        if (!interrogationResponseInput.trim()) {
+            setSystemMessage("⚠️ A resposta não pode ser vazia.");
+            return;
+        }
+        
+        if (!ws.current || ws.current.readyState !== WebSocket.OPEN) {
+            setSystemMessage("❌ Não conectado ao servidor");
+            return;
+        }
+        
+        ws.current.send(JSON.stringify({
+            type: "resposta_interrogatorio",
+            message: interrogationResponseInput.trim()
+        }));
+        
+        setInterrogationResponseInput("");
+        setSystemMessage("✅ Sua defesa foi enviada!");
     };
 
     const handleLeave = () => {
@@ -659,12 +755,22 @@ export default function Game() {
                             </div>
                         </div>
                         
-                        <button 
-                            onClick={handleLeave}
-                            className="px-4 py-2 bg-primaryRed/20 hover:bg-accentRed/30 border border-accentRed/30 rounded-lg text-accentRed text-sm font-medium tracking-wide transition-all font-roboto"
-                        >
-                            Sair da Partida
-                        </button>
+                        <div className="flex items-center gap-2">
+                            {isMyTurn && (
+                                <button 
+                                    onClick={handlePassTurn}
+                                    className="px-4 py-2 bg-green-600/20 hover:bg-green-600/30 border border-green-600/40 rounded-lg text-green-400 text-sm font-semibold tracking-wide transition-all font-roboto flex items-center gap-2 shadow-md hover:scale-[1.02]"
+                                >
+                                    Passar Vez ⏭️
+                                </button>
+                            )}
+                            <button 
+                                onClick={handleLeave}
+                                className="px-4 py-2 bg-primaryRed/20 hover:bg-accentRed/30 border border-accentRed/30 rounded-lg text-accentRed text-sm font-medium tracking-wide transition-all font-roboto"
+                            >
+                                Sair da Partida
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -758,13 +864,22 @@ export default function Game() {
                                                         {(p.id === currentTurnPlayerId || p.name === currentTurnPlayerId) && <span>🎯</span>}
                                                         {p.is_bot && <span>🤖</span>}
                                                         {isMyTurn && (String(p.id) !== String(myPlayerId) && p.name !== myPlayerName) && (
-                                                            <button 
-                                                                onClick={() => handleAccuse(p.id || p.name)}
-                                                                className="ml-auto px-2 py-0.5 bg-accentRed/20 hover:bg-accentRed/40 border border-accentRed/30 rounded text-[10px] text-accentRed font-roboto transition-all"
-                                                                title={`Acusar ${p.nickname || p.name}`}
-                                                            >
-                                                                ⚖️ Acusar
-                                                            </button>
+                                                            <div className="ml-auto flex items-center gap-1.5">
+                                                                <button 
+                                                                    onClick={() => handleInterrogateClick(p.id || p.name)}
+                                                                    className="px-2 py-0.5 bg-accentRed/20 hover:bg-accentRed/40 border border-accentRed/30 rounded text-[10px] text-accentRed font-roboto transition-all"
+                                                                    title={`Interrogar ${p.nickname || p.name}`}
+                                                                >
+                                                                    🔍 Interrogar
+                                                                </button>
+                                                                <button 
+                                                                    onClick={() => handleAccuse(p.id || p.name)}
+                                                                    className="px-2 py-0.5 bg-accentRed/20 hover:bg-accentRed/40 border border-accentRed/30 rounded text-[10px] text-accentRed font-roboto transition-all"
+                                                                    title={`Acusar ${p.nickname || p.name}`}
+                                                                >
+                                                                    ⚖️ Acusar
+                                                                </button>
+                                                            </div>
                                                         )}
                                                     </li>
                                                 ))}
@@ -858,33 +973,28 @@ export default function Game() {
                             </div>
                         ) : (
                             <>
-                                {(() => {
-                                    const meuID = localStorage.getItem("player_id") || myPlayerId || "Você";
-                                    const naoEhMinhaVez = currentTurnPlayerId && currentTurnPlayerId !== meuID && String(currentTurnPlayerId) !== String(meuID);
-                                    
-                                    return naoEhMinhaVez && currentPlayerName && (
-                                        <div className="mb-2 px-3 py-2 bg-accentRed/20 border border-accentRed/30 rounded-lg">
-                                            <p className="text-xs text-accentRed/80 font-roboto text-center">
-                                                ⏳ Aguarde sua vez. É a vez de <span className="font-bold text-accentRed">{currentPlayerName}</span>
-                                            </p>
-                                        </div>
-                                    );
-                                })()}
+                                {currentPlayerName && (
+                                    <div className="mb-2 px-3 py-2 bg-charcoalBlack/40 border border-accentRed/30 rounded-lg">
+                                        <p className="text-xs text-offWhite/80 font-roboto text-center">
+                                            💬 Chat livre para debate. Vez de realizar ações: <span className="font-bold text-accentRed">{currentPlayerName}</span>
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="flex gap-2">
                                     <input
                                         type="text"
                                         value={messageInput}
                                         onChange={(e) => setMessageInput(e.target.value)}
                                         onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                                        placeholder={isMyTurn ? "Digite sua mensagem..." : "Aguarde sua vez..."}
+                                        placeholder="Digite sua mensagem para o debate..."
                                         className="flex-1 px-3 py-2 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto disabled:opacity-50 disabled:cursor-not-allowed"
-                                        disabled={!isMyTurn || ws.current?.readyState !== WebSocket.OPEN}
+                                        disabled={playerStatus === "dead" || ws.current?.readyState !== WebSocket.OPEN}
                                     />
                                     <button
                                         onClick={handleSendMessage}
-                                        disabled={!isMyTurn || ws.current?.readyState !== WebSocket.OPEN}
+                                        disabled={playerStatus === "dead" || ws.current?.readyState !== WebSocket.OPEN}
                                         className="px-4 py-2 bg-primaryRed hover:bg-accentRed rounded-lg text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                                        title={!isMyTurn ? "Aguarde sua vez" : "Enviar mensagem"}
+                                        title="Enviar mensagem"
                                     >
                                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -941,6 +1051,128 @@ export default function Game() {
                                     </div>
                                 </>
                             );
+                        })()}
+                    </div>
+                </div>
+            )}
+
+            {/* 🔍 MODAL DE ENVIO DE INTERROGATÓRIO */}
+            {showInterrogateModal && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center">
+                    <div className="bg-darkGray border-2 border-accentRed rounded-xl p-6 max-w-md w-full mx-4 shadow-2xl">
+                        <h2 className="text-xl font-bold text-accentRed font-cinzel mb-4 flex items-center gap-2">
+                            🔍 Interrogar Suspeito
+                        </h2>
+                        {(() => {
+                            const target = players.find(p => String(p.id) === String(interrogatedTarget) || p.name === interrogatedTarget);
+                            const targetName = target?.nickname || target?.name || interrogatedTarget;
+                            return (
+                                <>
+                                    <p className="text-offWhite font-roboto text-sm mb-4">
+                                        Digite a pergunta que deseja fazer para <strong className="text-accentRed">{targetName}</strong>. 
+                                        {target?.is_bot && " Como ele é um robô de IA, ele responderá imediatamente baseando-se em sua personalidade."}
+                                    </p>
+                                    
+                                    <textarea
+                                        value={questionInput}
+                                        onChange={(e) => setQuestionInput(e.target.value)}
+                                        placeholder="Ex: Onde você estava no momento do crime? O que você sabe sobre a pista encontrada?"
+                                        rows={3}
+                                        className="w-full px-3 py-2 bg-charcoalBlack/50 border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto mb-4"
+                                    />
+                                    
+                                    <div className="flex gap-3">
+                                        <button 
+                                            onClick={submitInterrogation}
+                                            className="flex-1 px-4 py-2.5 bg-gradient-to-r from-primaryRed to-accentRed hover:from-accentRed hover:to-lightRed text-white rounded-lg font-bold font-roboto transition-all duration-300 shadow-md shadow-primaryRed/20 hover:scale-[1.02] active:scale-[0.98]"
+                                        >
+                                            🔍 Perguntar
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setShowInterrogateModal(false);
+                                                setInterrogatedTarget(null);
+                                                setQuestionInput("");
+                                            }}
+                                            className="flex-1 px-4 py-2.5 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-bold font-roboto transition-all"
+                                        >
+                                            ❌ Cancelar
+                                        </button>
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
+                </div>
+            )}
+
+            {/* 🔍 PAINEL DE INTERROGATÓRIO ATIVO */}
+            {activeInterrogation && (
+                <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center">
+                    <div className="bg-darkGray border-2 border-accentRed rounded-xl p-8 max-w-lg w-full mx-4 shadow-2xl relative overflow-hidden">
+                        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-accentRed to-transparent animate-pulse"></div>
+                        
+                        <div className="text-center mb-6">
+                            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-accentRed/10 border border-accentRed/30 mb-4 text-accentRed">
+                                <svg className="w-8 h-8 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                                </svg>
+                            </div>
+                            <h2 className="text-2xl font-bold text-white font-cinzel tracking-wider">
+                                🔍 Interrogatório em Andamento
+                            </h2>
+                            <p className="text-xs text-lightGray/60 font-roboto mt-1">
+                                Uma pergunta crucial foi feita
+                            </p>
+                        </div>
+                        
+                        <div className="bg-charcoalBlack/60 border border-accentRed/20 rounded-lg p-5 mb-6">
+                            <p className="text-xs text-accentRed uppercase font-bold tracking-wider mb-2 font-roboto">
+                                Pergunta de {activeInterrogation.interrogator} para {activeInterrogation.target}:
+                            </p>
+                            <p className="text-sm font-roboto text-offWhite leading-relaxed italic">
+                                "{activeInterrogation.question}"
+                            </p>
+                        </div>
+                        
+                        {(() => {
+                            const isMeTarget = String(myPlayerId).toLowerCase() === String(activeInterrogation.target).toLowerCase() || 
+                                               String(myPlayerName).toLowerCase() === String(activeInterrogation.target).toLowerCase();
+                            
+                            if (isMeTarget) {
+                                return (
+                                    <div className="space-y-4">
+                                        <p className="text-xs text-yellow-400 font-roboto text-center font-semibold">
+                                            ⚠️ Você está sendo interrogado! Digite sua defesa ou resposta abaixo:
+                                        </p>
+                                        <textarea
+                                            value={interrogationResponseInput}
+                                            onChange={(e) => setInterrogationResponseInput(e.target.value)}
+                                            placeholder="Escreva sua resposta de defesa de forma convincente..."
+                                            rows={3}
+                                            className="w-full px-3 py-2 bg-charcoalBlack border border-primaryRed/40 rounded-lg text-sm text-offWhite placeholder-lightGray/50 focus:outline-none focus:border-accentRed/60 focus:ring-2 focus:ring-accentRed/20 transition-all font-roboto"
+                                        />
+                                        <button 
+                                            onClick={submitInterrogationResponse}
+                                            className="w-full px-4 py-3 bg-gradient-to-r from-primaryRed to-accentRed hover:from-accentRed hover:to-lightRed text-white rounded-lg font-bold font-roboto transition-all duration-300 shadow-md shadow-primaryRed/20 hover:scale-[1.01]"
+                                        >
+                                            📤 Enviar Defesa
+                                        </button>
+                                    </div>
+                                );
+                            } else {
+                                return (
+                                    <div className="text-center p-5 bg-gray-800/40 border border-gray-700/50 rounded-lg">
+                                        <div className="animate-spin h-6 w-6 border-2 border-accentRed border-t-transparent rounded-full mx-auto mb-3"></div>
+                                        <p className="text-sm text-gray-400 font-roboto">
+                                            Aguardando resposta de <strong className="text-white">{activeInterrogation.target}</strong>...
+                                        </p>
+                                        <p className="text-xs text-gray-500 font-roboto mt-1">
+                                            Todos os jogadores podem acompanhar a resposta no chat.
+                                        </p>
+                                    </div>
+                                );
+                            }
                         })()}
                     </div>
                 </div>
