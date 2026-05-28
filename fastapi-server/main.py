@@ -83,6 +83,7 @@ from bot_memory import (
 
 # Rate limiting
 from rate_limiter import check_rate_limit, clear_room_limits
+from openrouter_client import call_openrouter
 
 # Turn lock security
 _turn_locks: dict[str, dict] = {}  # {room_id: {"player_id": "...", "locked_at": float, "action_taken": bool}}
@@ -118,28 +119,18 @@ async def generate_case(prompt_template: str = None):
         provider = os.getenv("AI_PROVIDER", "groq").lower()
         
         if provider == "openrouter":
-            # Usa OpenRouter
-            api_key = os.getenv("OPENROUTER_API_KEY", "")
-            if not api_key:
-                raise ValueError("OPENROUTER_API_KEY não encontrada no ambiente")
             logger.info(f"🔄 Gerando caso com OpenRouter...")
-            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
-            logger.info(f"   Modelo: {model}")
-            
-            client = get_openrouter_client()
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.chat.completions.create,
-                    model=model,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_GAME_MASTER},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.8,
-                    max_tokens=2000
-                ),
-                timeout=30.0  # Timeout aumentado para OpenRouter
+            result = await call_openrouter(
+                [
+                    {"role": "system", "content": SYSTEM_GAME_MASTER},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.8,
+                max_tokens=2000,
+                timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")),
             )
+            if not result:
+                return generate_fallback_case()
         elif provider == "deepseek":
             # Usa DeepSeek
             api_key = os.getenv("DEEPSEEK_API_KEY", "")
@@ -183,7 +174,8 @@ async def generate_case(prompt_template: str = None):
                 timeout=15.0
             )
         
-        result = response.choices[0].message.content
+        if provider != "openrouter":
+            result = response.choices[0].message.content
         logger.info(f"✅ Caso gerado com sucesso: {len(result)} chars")
         
         # ✅ Limpa JSON se necessário (remove markdown backticks)
@@ -522,7 +514,7 @@ def ai_generate(prompt: str, system: str = None) -> str:
     Provedor é escolhido via variável de ambiente AI_PROVIDER (groq, deepseek ou openrouter)
     Padrão: groq
     
-    Para OpenRouter, você pode especificar o modelo via OPENROUTER_MODEL (padrão: meta-llama/llama-3.3-70b-instruct)
+    Para OpenRouter, use OPENROUTER_PRIMARY_MODEL (padrão: qwen/qwen3-next-80b-a3b-instruct:free)
     """
     provider = os.getenv("AI_PROVIDER", "groq").lower()
     
@@ -545,7 +537,7 @@ def ai_generate(prompt: str, system: str = None) -> str:
             return completion.choices[0].message.content or ""
         elif provider == "openrouter":
             # Usa OpenRouter (acesso a múltiplos modelos)
-            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+            model = os.getenv("OPENROUTER_PRIMARY_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free")
             print(f"🤖 Usando OpenRouter (modelo: {model})...")
             client = get_openrouter_client()
             completion = client.chat.completions.create(
@@ -636,196 +628,59 @@ BOT_PERSONALITIES = {
     }
 }
 
+BOT_PERSONAS = {
+    "Shadow_Hunter": {
+        "style": "frio, observador, desconfiado",
+        "tone": "responde de forma curta, calculada e misteriosa",
+        "behavior": "evita se comprometer, mas solta pistas sutis"
+    },
+    "Night_Stalker": {
+        "style": "irônico, provocador e escorregadio",
+        "tone": "usa respostas ambíguas e tenta inverter suspeitas",
+        "behavior": "questiona os outros jogadores e raramente responde direto"
+    },
+    "Dark_Phoenix": {
+        "style": "emocional, intenso e impulsivo",
+        "tone": "fala com urgência e acusa com facilidade",
+        "behavior": "reage mal quando é pressionado"
+    }
+}
 
-async def _generate_response_openrouter(bot_name: str, context_str: str) -> str:
-    """Tenta gerar resposta via OpenRouter."""
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-    if not openrouter_api_key:
-        raise ValueError("OPENROUTER_API_KEY não configurada.")
+DEFAULT_BOT_PERSONA = {
+    "style": "cauteloso, desconfiado e atento",
+    "tone": "responde com naturalidade e tensão controlada",
+    "behavior": "observa contradições e tenta sobreviver sem se expor demais",
+}
 
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {openrouter_api_key}",
-                "HTTP-Referer": "https://deadlytruth.app",
-                "X-Title": "Deadly Truth Game",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "deepseek/deepseek-chat",  # Modelo DeepSeek via OpenRouter
-                "messages": [
-                    {"role": "system", "content": f"Você é o bot {bot_name} em um jogo de mistério. Responda de forma concisa e no personagem."},
-                    {"role": "user", "content": context_str}
-                ],
-                "temperature": 0.8,
-                "max_tokens": 150
-            },
-            timeout=10.0
-        )
-        response.raise_for_status()  # Levanta exceção para status de erro (4xx, 5xx)
-        data = response.json()
-        message = data["choices"][0]["message"]["content"]
-        logger.info(f"✅ Bot {bot_name} respondeu via OpenRouter.")
-        return message
+LOCAL_BOT_FALLBACKS = {
+    "defensive": [
+        "Não vou aceitar essa acusação sem uma prova concreta.",
+        "Você está olhando para a pessoa errada. Pense melhor no que foi dito antes.",
+        "Eu respondo, mas não vou servir de distração para o verdadeiro culpado."
+    ],
+    "suspicious": [
+        "Tem algo estranho nessa história. Alguém aqui está omitindo uma parte importante.",
+        "Eu reparei numa contradição, mas ainda quero ver quem vai se entregar primeiro.",
+        "Essa pergunta parece conveniente demais para ser inocente."
+    ],
+    "afraid": [
+        "Eu não gostei do rumo dessa conversa. Tem alguém tentando manipular todos nós.",
+        "Se continuarmos errando, o assassino vai ganhar tempo.",
+        "Eu vi algo, mas não sei se devo falar agora."
+    ],
+    "analytical": [
+        "Vamos separar emoção de evidência. A linha do tempo ainda não fecha.",
+        "Essa versão tem uma falha: ninguém confirmou esse horário.",
+        "Antes de acusar, precisamos comparar quem estava sozinho no momento crítico."
+    ],
+    "evasive": [
+        "Não tenho certeza se essa é a pergunta certa agora.",
+        "Prefiro não responder tudo de uma vez. Algumas coisas ainda não fazem sentido.",
+        "Você quer uma resposta simples para uma situação que não é simples."
+    ]
+}
 
-
-async def _generate_response_groq(bot_name: str, context_str: str) -> str:
-    """Tenta gerar resposta via Groq."""
-    groq_api_key = os.getenv("GROQ_API_KEY")
-    if not groq_api_key:
-        raise ValueError("GROQ_API_KEY não configurada.")
-
-    groq_client = get_groq_client()
-    response = await asyncio.wait_for(
-        asyncio.to_thread(
-            lambda: groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",  # ✅ Modelo Groq atualizado
-                messages=[
-                    {"role": "system", "content": f"Você é o bot {bot_name} em um jogo de mistério. Responda de forma concisa e no personagem."},
-                    {"role": "user", "content": context_str}
-                ],
-                temperature=0.8,
-                max_tokens=150
-            )
-        ),
-        timeout=10.0
-    )
-    message = response.choices[0].message.content
-    logger.info(f"✅ Bot {bot_name} respondeu via Groq.")
-    return message
-
-
-async def bot_generate_response(bot_name: str, context: dict, question: str = None) -> str:
-    """
-    Gera resposta de um bot usando sistema de cascata: OpenRouter → Groq → Fallback.
-    Os bots analisam pistas e interagem como se fossem jogadores reais.
-    
-    Args:
-        bot_name: Nome do bot
-        context: Contexto do caso (descrição, evidências, chat history, suspeitos, etc)
-        question: Pergunta específica (se houver)
-    """
-    personality = BOT_PERSONALITIES.get(bot_name, BOT_PERSONALITIES["Silent_Reaper"])
-    
-    # Monta o contexto completo do caso
-    case_desc = context.get("case_description", "Mistério desconhecido")
-    case_history = context.get("case_history", "")
-    case_location = context.get("case_location", "")
-    case_weapon = context.get("case_weapon", "")
-    chat_history = context.get("chat_history", [])
-    evidences = context.get("evidences", [])
-    suspects = context.get("suspects", [])
-    
-    # Histórico recente do chat (últimas 8 mensagens para contexto melhor)
-    recent_chat = "\n".join([
-        f"{msg.get('player', 'Unknown')}: {msg.get('text', '')}"
-        for msg in chat_history[-8:]
-    ]) if chat_history else "Nenhuma conversa ainda."
-    
-    # Evidências disponíveis formatadas
-    evidence_list = "\n".join([
-        f"🔍 {ev}" for ev in evidences
-    ]) if evidences else "Nenhuma evidência revelada ainda."
-    
-    # Suspeitos disponíveis
-    suspects_list = "\n".join([
-        f"• {sus}" for sus in suspects
-    ]) if suspects else "Suspeitos ainda não identificados."
-    
-    # Sistema: Definição da personalidade e comportamento como jogador
-    system_prompt = f"""Você é {bot_name}, um jogador humano em um jogo de mistério chamado "Deadly Truth".
-
-PERSONALIDADE: {personality['personality']}
-ESTILO DE FALA: {personality['style']}
-CARACTERÍSTICAS: {', '.join(personality['traits'])}
-
-IMPORTANTE - COMPORTAMENTO COMO JOGADOR HUMANO:
-1. Você é um JOGADOR HUMANO, não um bot. Aja como tal.
-2. Analise as EVIDÊNCIAS disponíveis e faça conexões lógicas
-3. Use as pistas para formular teorias e suspeitas
-4. Faça perguntas inteligentes baseadas nas evidências
-5. Compartilhe suas análises e observações com outros jogadores
-6. Seja estratégico: use as informações para descobrir o culpado
-7. Responda SEMPRE em português BR
-8. Seja BREVE - máximo 2-3 frases curtas
-9. Mantenha sua personalidade única em cada resposta
-10. Interaja naturalmente - você quer GANHAR o jogo!
-
-VOCÊ PODE USAR NATURALMENTE:
-- Palavras como "suspeito", "assassino", "detetive", "culpado" nas suas mensagens
-- Referências a outros jogadores como suspeitos
-- Análises sobre quem pode ser o assassino
-- Discussões sobre estratégias de investigação
-- Essas palavras fazem parte do jogo e são naturais nas conversas
-
-COMO USAR AS PISTAS:
-- Analise cada evidência cuidadosamente
-- Faça conexões entre diferentes pistas
-- Formule hipóteses baseadas nas evidências
-- Questione inconsistências
-- Compartilhe suas descobertas com o grupo
-- Mencione suspeitos e teorias sobre o assassino naturalmente
-"""
-    
-    # Prompt: Contexto completo + Pergunta
-    if question:
-        user_prompt = f"""CONTEXTO DO CASO:
-📋 DESCRIÇÃO: {case_desc}
-📖 HISTÓRIA: {case_history}
-📍 LOCAL DO CORPO: {case_location}
-🔪 ARMA DO CRIME: {case_weapon}
-
-SUSPEITOS:
-{suspects_list}
-
-EVIDÊNCIAS REVELADAS:
-{evidence_list}
-
-CONVERSA RECENTE:
-{recent_chat}
-
-PERGUNTA/SITUAÇÃO: {question}
-
-Como {bot_name}, analise as evidências e responda de forma natural como um jogador humano tentando resolver o mistério (máx 2-3 frases):"""
-    else:
-        # Bot falando espontaneamente - deve analisar pistas e interagir
-        user_prompt = f"""CONTEXTO DO CASO:
-📋 DESCRIÇÃO: {case_desc}
-📖 HISTÓRIA: {case_history}
-📍 LOCAL DO CORPO: {case_location}
-🔪 ARMA DO CRIME: {case_weapon}
-
-SUSPEITOS:
-{suspects_list}
-
-EVIDÊNCIAS REVELADAS:
-{evidence_list}
-
-CONVERSA RECENTE:
-{recent_chat}
-
-É sua vez de falar. Como {bot_name}, analise as evidências disponíveis e faça uma observação, pergunta ou análise relevante como um jogador humano tentando descobrir o culpado (máx 2-3 frases):"""
-    
-    # Monta o contexto completo para enviar
-    full_context = f"{system_prompt}\n\n{user_prompt}"
-    
-    # ✅ Sistema de cascata: OpenRouter → Groq → Fallback
-    # 1️⃣ Tentar OpenRouter
-    try:
-        return await _generate_response_openrouter(bot_name, full_context)
-    except Exception as e:
-        logger.warning(f"❌ OpenRouter falhou para {bot_name}: {e}")
-    
-    # 2️⃣ Tentar Groq
-    try:
-        return await _generate_response_groq(bot_name, full_context)
-    except Exception as e:
-        logger.warning(f"❌ Groq falhou para {bot_name}: {e}")
-    
-    # 3️⃣ Usar fallback
-    logger.warning(f"⚠️ Ambas as APIs falharam para {bot_name}. Usando fallback.")
-    return generate_bot_response_fallback(bot_name, context)
+BOT_AI_MEMORY: dict[str, dict[str, dict]] = {}
 
 
 def clean_json_response(response_text: str) -> str:
@@ -841,73 +696,230 @@ def clean_json_response(response_text: str) -> str:
     return response_text.strip()
 
 
-def generate_bot_response_fallback(bot_name: str, context: dict) -> str:
-    """Respostas pré-definidas para bots quando APIs falham"""
-    responses = {
-        "Shadow_Hunter": [
-            "Hmm... preciso investigar isso mais a fundo.",
-            "Algo não está batendo aqui.",
-            "Vou analisar essas evidências com mais cuidado."
-        ],
-        "Night_Stalker": [
-            "...",
-            "Interessante.",
-            "Hmm."
-        ],
-        "Dark_Phoenix": [
-            "Não tenho nada a ver com isso.",
-            "Estava em outro lugar naquela hora.",
-            "Vocês estão acusando a pessoa errada.",
-            "Eu não fiz nada de errado.",
-            "Eu... eu não sei o que dizer..."
-        ],
-        "Silent_Reaper": [
-            "Eu vi algo estranho naquela noite.",
-            "Alguém estava agindo suspeito.",
-            "Não confio em ninguém aqui.",
-            "Há mais coisas acontecendo do que vocês pensam.",
-            "Irrelevante."
-        ],
-        "Ghost_Whisper": [
-            "Ah, isso é interessante...",
-            "Eu conheço alguns segredos aqui.",
-            "Alguém está escondendo algo."
-        ],
-        "Blood_Moon": [
-            "Isso não pode ser coincidência!",
-            "Algo muito suspeito está acontecendo!",
-            "Precisamos investigar isso imediatamente!"
-        ],
-        "Crimson_Blade": [
-            "Vamos ao ponto.",
-            "Chega de conversa fiada.",
-            "Preciso de respostas diretas."
-        ],
-        "Phantom_Eyes": [
-            "Deixe-me refletir sobre isso.",
-            "Há algo que não está certo aqui.",
-            "Preciso de mais informações."
-        ],
-        "Raven_Soul": [
-            "Sinto uma energia estranha aqui...",
-            "Algo sobrenatural está acontecendo.",
-            "As energias não estão alinhadas."
-        ],
-        "Death_Dealer": [
-            "Já vi isso antes.",
-            "No meu tempo, isso era diferente.",
-            "Conheço esse tipo de situação."
-        ],
-        "LeeJunFan": [
-            "Preciso de mais informações.",
-            "Alguém está mentindo aqui.",
-            "Vamos investigar isso juntos.",
-            "Tenho uma teoria sobre o que aconteceu."
-        ]
+def _bot_id(bot) -> str:
+    if isinstance(bot, dict):
+        return str(bot.get("id") or bot.get("name") or "bot")
+    return str(bot)
+
+
+def _bot_name(bot) -> str:
+    if isinstance(bot, dict):
+        return str(bot.get("name") or bot.get("id") or "Bot")
+    return str(bot)
+
+
+def _get_bot_persona(bot_name: str) -> dict:
+    return BOT_PERSONAS.get(bot_name, DEFAULT_BOT_PERSONA)
+
+
+def _get_bot_ai_memory(room_id: str, bot_name: str) -> dict:
+    room_memory = BOT_AI_MEMORY.setdefault(room_id, {})
+    return room_memory.setdefault(bot_name, {
+        "last_replies": [],
+        "suspicions": {},
+        "known_clues": [],
+        "contradictions": [],
+    })
+
+
+def _remember_bot_reply(room_id: str, bot_name: str, reply: str):
+    memory = _get_bot_ai_memory(room_id, bot_name)
+    memory["last_replies"].append(reply)
+    memory["last_replies"] = memory["last_replies"][-6:]
+
+
+def _build_bot_context(room: dict, extra_context: dict | None = None) -> dict:
+    room_id = room.get("room_id", "")
+    case_data = room.get("case", {}) or {}
+    context = {
+        "case_description": case_data.get("descricao", ""),
+        "case_history": case_data.get("historia", ""),
+        "case_location": case_data.get("local_corpo", ""),
+        "case_weapon": case_data.get("arma_crime", ""),
+        "chat_history": room.get("chat", []),
+        "evidences": get_all_clues_list(room_id) if room_id else case_data.get("evidencias", []),
+        "suspects": case_data.get("suspeitos", []),
+        "phase": room.get("phase", "turn"),
+        "active_accusation": room.get("active_accusation"),
     }
-    
-    bot_responses = responses.get(bot_name, ["Sem comentários."])
-    return random.choice(bot_responses)
+    if extra_context:
+        context.update(extra_context)
+    return context
+
+
+def _select_local_fallback(bot_name: str, context: dict, memory: dict, is_killer: bool = False, accused: bool = False) -> str:
+    phase = context.get("phase", "turn")
+    if accused or phase == "defense":
+        categories = ["defensive", "evasive", "suspicious"]
+    elif bot_name == "Shadow_Hunter":
+        categories = ["analytical", "suspicious", "evasive"]
+    elif bot_name == "Night_Stalker":
+        categories = ["evasive", "suspicious", "defensive"]
+    elif bot_name == "Dark_Phoenix":
+        categories = ["afraid", "defensive", "suspicious"]
+    elif is_killer:
+        categories = ["evasive", "defensive", "suspicious"]
+    else:
+        categories = ["analytical", "suspicious", "afraid", "evasive"]
+
+    last_replies = set(memory.get("last_replies", []))
+    candidates = []
+    for category in categories:
+        candidates.extend(LOCAL_BOT_FALLBACKS.get(category, []))
+    available = [reply for reply in candidates if reply not in last_replies] or candidates
+    reply = random.choice(available)
+    _remember_bot_reply(context.get("room_id", ""), bot_name, reply)
+    return reply
+
+
+def _clean_bot_reply(reply: str, last_replies: list[str]) -> str:
+    cleaned = clean_json_response(reply or "")
+    cleaned = re.sub(r"^(Resposta|Bot|Suspeito)\s*:\s*", "", cleaned, flags=re.IGNORECASE).strip()
+    if cleaned in last_replies:
+        cleaned = f"{cleaned} Há um detalhe nessa linha do tempo que ainda me incomoda."
+    return cleaned[:900]
+
+
+async def _generate_bot_text(bot, room, question=None, context=None, purpose="reply", accusation=None):
+    room_id = room.get("room_id", "")
+    bot_name = _bot_name(bot)
+    persona = _get_bot_persona(bot_name)
+    bot_is_killer = bool(bot.get("is_killer")) if isinstance(bot, dict) else False
+    memory = _get_bot_ai_memory(room_id, bot_name)
+    merged_context = _build_bot_context(room, context)
+    merged_context["room_id"] = room_id
+    chat_history = merged_context.get("chat_history", [])[-8:]
+    recent_chat = "\n".join(f"{m.get('player', '?')}: {m.get('text', '')}" for m in chat_history) or "Sem debate recente."
+    evidences = merged_context.get("evidences", [])[-8:]
+    evidence_text = "\n".join(f"- {item}" for item in evidences) or "Nenhuma pista concreta revelada."
+    last_replies = memory.get("last_replies", [])
+    accusation_text = json.dumps(accusation or merged_context.get("active_accusation") or {}, ensure_ascii=False)
+
+    system_prompt = f"""Você interpreta {bot_name}, um jogador de investigação criminal em Deadly Truth.
+Estilo: {persona['style']}.
+Tom: {persona['tone']}.
+Comportamento: {persona['behavior']}.
+Regras obrigatórias:
+- responda em português brasileiro;
+- use no máximo 2 a 4 frases;
+- nunca repita a última frase nem frases genéricas;
+- mantenha a personalidade do bot;
+- inclua pista, contradição, suspeita ou reação emocional quando fizer sentido;
+- não revele diretamente se você é o assassino;
+- se você for assassino, defenda-se e manipule suspeitas sutilmente;
+- se for inocente, colabore, mas pode desconfiar, errar ou se contradizer."""
+
+    user_prompt = f"""Fase do jogo: {merged_context.get('phase')}.
+Você é assassino? {"sim" if bot_is_killer else "não"}.
+Finalidade da fala: {purpose}.
+Pergunta/situação: {question or "fale no seu turno sem ser genérico"}.
+Acusação ativa: {accusation_text}.
+Pistas conhecidas:
+{evidence_text}
+Debate recente:
+{recent_chat}
+Últimas respostas suas que NÃO podem ser repetidas:
+{json.dumps(last_replies[-4:], ensure_ascii=False)}
+
+Responda apenas com a fala final de {bot_name}."""
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+    text = await call_openrouter(messages, temperature=0.85, max_tokens=220, timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")))
+    meta = getattr(call_openrouter, "last_result", {}) or {}
+    if text:
+        reply = _clean_bot_reply(text, last_replies)
+        _remember_bot_reply(room_id, bot_name, reply)
+        logger.info(f"[BOT_REPLY] bot={bot_name} source={meta.get('source')} model={meta.get('model')}")
+        return reply, meta
+
+    fallback_reply = _select_local_fallback(
+        bot_name,
+        merged_context,
+        memory,
+        is_killer=bot_is_killer,
+        accused=purpose == "defense",
+    )
+    meta = getattr(call_openrouter, "last_result", {}) or {"source": "local_fallback", "model": None}
+    logger.info(f"[BOT_REPLY] bot={bot_name} source=local_fallback reason={meta.get('error') or 'openrouter_failed'}")
+    return fallback_reply, {"source": "local_fallback", "model": None, "reason": meta.get("error")}
+
+
+async def generate_bot_reply(bot, room, question=None, context=None):
+    reply, _meta = await _generate_bot_text(bot, room, question=question, context=context, purpose="reply")
+    return reply
+
+
+async def generate_bot_defense(bot, accusation, room):
+    reply, _meta = await _generate_bot_text(
+        bot,
+        room,
+        question="Você foi acusado de ser o assassino. Apresente uma defesa curta, tensa e coerente.",
+        context={"phase": "defense"},
+        purpose="defense",
+        accusation=accusation,
+    )
+    return reply
+
+
+async def generate_bot_vote(bot, accusation, room):
+    reply, meta = await _generate_bot_text(
+        bot,
+        room,
+        question="Vote apenas com uma palavra: culpado, inocente ou abstencao. Considere sua personalidade e suspeitas.",
+        context={"phase": "voting"},
+        purpose="vote",
+        accusation=accusation,
+    )
+    lowered = (reply or "").lower()
+    if "culpado" in lowered:
+        return "culpado"
+    if "absten" in lowered:
+        return "abstencao"
+    if "inocente" in lowered:
+        return "inocente"
+    accused = str((accusation or {}).get("accused_id", ""))
+    alive = get_alive_players(room)
+    return select_bot_vote(
+        room_id=room.get("room_id", ""),
+        bot_name=_bot_name(bot),
+        accused=accused,
+        bot_is_killer=bool(bot.get("is_killer")) if isinstance(bot, dict) else False,
+        alive_players=[p.get("name") for p in alive],
+    )
+
+
+async def generate_case_with_ai(theme=None):
+    prompt = CREATE_CASE_TEMPLATE
+    if theme:
+        prompt = f"{CREATE_CASE_TEMPLATE}\n\nTema solicitado: {theme}"
+    messages = [
+        {"role": "system", "content": SYSTEM_GAME_MASTER},
+        {"role": "user", "content": prompt},
+    ]
+    text = await call_openrouter(messages, temperature=0.8, max_tokens=2000, timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")))
+    return text or generate_fallback_case()
+
+
+async def bot_generate_response(bot_name: str, context: dict, question: str = None) -> str:
+    """Compatibilidade: usa o novo motor OpenRouter dos bots com fallback local."""
+    room = {
+        "room_id": context.get("room_id", ""),
+        "case": {
+            "descricao": context.get("case_description", ""),
+            "historia": context.get("case_history", ""),
+            "local_corpo": context.get("case_location", ""),
+            "arma_crime": context.get("case_weapon", ""),
+            "evidencias": context.get("evidences", []),
+            "suspeitos": context.get("suspects", []),
+        },
+        "chat": context.get("chat_history", []),
+        "phase": context.get("phase", "turn"),
+        "players": context.get("players", []),
+    }
+    return await generate_bot_reply({"name": bot_name, "id": bot_name}, room, question=question, context=context)
 
 
 async def process_bot_turn(room_id: str, current_turn: int, current_player: dict):
@@ -920,6 +932,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
         return
     
     room = ROOMS[room_id]
+    room["room_id"] = room_id
     bot_name = current_player.get("name", "Bot")
     bot_id = str(current_player.get("id") or bot_name)
     
@@ -929,6 +942,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
     # Prepara o contexto completo para o bot (com todas as pistas acumuladas)
     case_data = room.get("case", {})
     context = {
+        "room_id": room_id,
         "case_description": case_data.get("descricao", ""),
         "case_history": case_data.get("historia", ""),
         "case_location": case_data.get("local_corpo", ""),
@@ -939,7 +953,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
     }
     
     # Gera resposta do bot usando DeepSeek (motor para interação de bots)
-    bot_response = await bot_generate_response(bot_name, context)
+    bot_response, ai_meta = await _generate_bot_text(current_player, room, context=context, purpose="reply")
     
     # Registra declaração do bot para consistência e evitar contradições
     record_bot_statement(room_id, bot_name, bot_response, context="turn_speech")
@@ -965,7 +979,9 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
                     "type": "player_message",  # Trata como mensagem normal
                     "player": bot_name,
                     "message": bot_response,
-                    "dead": is_bot_dead
+                    "dead": is_bot_dead,
+                    "ai_source": ai_meta.get("source"),
+                    "ai_model": ai_meta.get("model")
                 })
             except:
                 pass
@@ -979,6 +995,7 @@ async def process_bot_interrogation_reply(room_id: str, bot_name: str, question:
     room = ROOMS.get(room_id)
     if not room:
         return
+    room["room_id"] = room_id
         
     case_data = room.get("case", {})
     context = {
@@ -1001,40 +1018,37 @@ async def process_bot_interrogation_reply(room_id: str, bot_name: str, question:
     bot_is_killer = bot_info.get("is_killer", False) if bot_info else False
     bot_display_name = bot_info.get("name", bot_name) if bot_info else bot_name
     
-    # Formata prompt com o template de interrogatório do prompts.py
-    prompt = INTERROGATION_TEMPLATE.format(
-        case_summary=json.dumps(context),
-        suspeito=bot_display_name,
-        pergunta=question,
-        nivel=room.get("nivel", "Intermediário")
-    )
-    
     try:
-        # Chama a geração de IA usando o motor configurado
-        response_text = await generate_case(prompt)
-        
-        # Faz o parse da resposta JSON retornada
-        parsed = parse_interrogation_response(response_text)
-        reply = parsed.get("resposta", "Não tenho nada a declarar.")
-        sinais = parsed.get("sinais_nao_verbais", "")
+        full_reply, ai_meta = await _generate_bot_text(
+            bot_info or {"id": bot_name, "name": bot_display_name, "is_killer": bot_is_killer},
+            room,
+            question=f"Você está sendo interrogado. Pergunta recebida: {question}",
+            context={**context, "phase": "interrogation"},
+            purpose="interrogation",
+        )
+        sinais = ""
         
         # Se for o assassino e a IA não gerou sinais nervosos, insere por padrão para dar pistas
         if bot_is_killer and (not sinais or "não" in sinais.lower() or "nenhum" in sinais.lower()):
             sinais = "Desvia o olhar com inquietação e limpa o suor das mãos."
             
-        full_reply = f"{reply}"
-        if sinais:
-            full_reply += f" *(Ações: {sinais})*"
+        if bot_is_killer and "ação" not in full_reply.lower() and "olhar" not in full_reply.lower():
+            full_reply += " *(Desvia o olhar por um instante antes de responder.)*"
             
         # Registra na consistência do bot
         record_bot_statement(room_id, bot_display_name, full_reply, context="interrogation_reply")
-        await submit_interrogation_result(room_id, str(bot_info.get("id") if bot_info else bot_name), full_reply)
+        await submit_interrogation_result(room_id, str(bot_info.get("id") if bot_info else bot_name), full_reply, metadata=ai_meta)
         
     except Exception as e:
         logger.error(f"❌ Erro no interrogatório do bot {bot_name}: {e}")
-        fallback_reply = generate_bot_response_fallback(bot_name, context)
-        
-        await submit_interrogation_result(room_id, str(bot_info.get("id") if bot_info else bot_name), fallback_reply)
+        memory = _get_bot_ai_memory(room_id, bot_display_name)
+        fallback_reply = _select_local_fallback(bot_display_name, {**context, "room_id": room_id, "phase": "interrogation"}, memory, is_killer=bot_is_killer)
+        await submit_interrogation_result(
+            room_id,
+            str(bot_info.get("id") if bot_info else bot_name),
+            fallback_reply,
+            metadata={"source": "local_fallback", "model": None, "reason": str(e)},
+        )
 
 
 def extract_json_from_string(text, validate_with_pydantic=None):
@@ -1294,6 +1308,7 @@ async def create_case(req: CreateCaseRequest):
     
     # Inicializar estrutura de jogo
     ROOMS[room_id] = {
+        "room_id": room_id,
         "case": case,
         "chat": [],
         "nivel": req.nivel,
@@ -1581,7 +1596,7 @@ Responda APENAS com a pista, sem explicações adicionais:"""
         
         if provider == "openrouter":
             client = get_openrouter_client()
-            model = os.getenv("OPENROUTER_MODEL", "meta-llama/llama-3.3-70b-instruct")
+            model = os.getenv("OPENROUTER_PRIMARY_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free")
             response = client.chat.completions.create(
                 model=model,
                 messages=[
@@ -2052,7 +2067,7 @@ async def finish_game(room_id: str, result: dict):
         GAME_EVENTS[room_id]["player_action_event"].set()
 
 
-async def submit_interrogation_result(room_id: str, responder_id: str, response_text: str, timed_out: bool = False):
+async def submit_interrogation_result(room_id: str, responder_id: str, response_text: str, timed_out: bool = False, metadata: dict | None = None):
     room = ROOMS.get(room_id)
     if not room or not room.get("active_interrogation"):
         return
@@ -2078,11 +2093,15 @@ async def submit_interrogation_result(room_id: str, responder_id: str, response_
         "question": active.get("question"),
         "message": response_text,
         "player": target_name,
+        "ai_source": (metadata or {}).get("source"),
+        "ai_model": (metadata or {}).get("model"),
     })
     await broadcast(room_id, {
         "type": "resposta_interrogatorio",
         "player": target_name,
         "message": response_text,
+        "ai_source": (metadata or {}).get("source"),
+        "ai_model": (metadata or {}).get("model"),
     })
     room["active_interrogation"] = None
     clear_interrogation(room_id)
@@ -2186,6 +2205,7 @@ async def bot_defense_task(room_id: str, accused_id: str, created_at: float):
     room = ROOMS.get(room_id)
     if not room or not room.get("active_accusation") or room["active_accusation"].get("created_at") != created_at:
         return
+    room["room_id"] = room_id
     accused = get_player_by_id(room, accused_id)
     case_data = room.get("case", {})
     context = {
@@ -2195,11 +2215,7 @@ async def bot_defense_task(room_id: str, accused_id: str, created_at: float):
         "evidences": get_all_clues_list(room_id),
         "suspects": case_data.get("suspeitos", []),
     }
-    defense = await bot_generate_response(
-        accused.get("name", accused_id),
-        context,
-        question="Você foi acusado de ser o assassino. Apresente uma defesa curta e convincente.",
-    )
+    defense = await generate_bot_defense(accused, room.get("active_accusation"), room)
     await submit_defense(room_id, accused_id, defense)
 
 
@@ -2269,13 +2285,18 @@ async def auto_bot_votes(room_id: str, accusation_created_at: float):
         player_id = str(player.get("id"))
         if not player.get("is_bot") or player_id in room.get("votes", {}):
             continue
-        vote = select_bot_vote(
-            room_id=room_id,
-            bot_name=player.get("name", player_id),
-            accused=accused_id,
-            bot_is_killer=bool(player.get("is_killer")),
-            alive_players=[p.get("name") for p in alive],
-        )
+        room["room_id"] = room_id
+        try:
+            vote = await generate_bot_vote(player, active, room)
+        except Exception as exc:
+            logger.warning(f"[BOT_REPLY] bot={player.get('name', player_id)} source=local_fallback reason=vote_ai_error:{exc}")
+            vote = select_bot_vote(
+                room_id=room_id,
+                bot_name=player.get("name", player_id),
+                accused=accused_id,
+                bot_is_killer=bool(player.get("is_killer")),
+                alive_players=[p.get("name") for p in alive],
+            )
         await register_vote(room_id, player_id, vote)
 
 
@@ -3018,6 +3039,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
     # Inicializa estrutura de jogo se necessário
     if room_id not in ROOMS:
         ROOMS[room_id] = {
+            "room_id": room_id,
             "case": {},
             "chat": [],
             "nivel": "Iniciante",
@@ -3496,7 +3518,14 @@ async def ws_room(websocket: WebSocket, room_id: str):
                                 
                                 # Gera resposta do bot usando DeepSeek
                                 try:
-                                    bot_reply = await bot_generate_response(bot_name, context, question=f"Jogador {sender_label} disse: {message_text}")
+                                    room["room_id"] = room_id
+                                    bot_reply, ai_meta = await _generate_bot_text(
+                                        responding_bot,
+                                        room,
+                                        question=f"Jogador {sender_label} disse: {message_text}",
+                                        context={**context, "room_id": room_id, "phase": room.get("phase", "turn")},
+                                        purpose="reply",
+                                    )
                                     
                                     # Adiciona ao histórico do chat (sem indicar que é bot)
                                     if room_id in ROOMS:
@@ -3518,7 +3547,9 @@ async def ws_room(websocket: WebSocket, room_id: str):
                                         "type": "player_message",  # Trata como mensagem normal
                                         "player": bot_name,
                                         "message": bot_reply,
-                                        "dead": is_bot_dead
+                                        "dead": is_bot_dead,
+                                        "ai_source": ai_meta.get("source"),
+                                        "ai_model": ai_meta.get("model")
                                     })
                                 except Exception as e:
                                     print(f"❌ Erro ao gerar resposta do bot {bot_name}: {e}")

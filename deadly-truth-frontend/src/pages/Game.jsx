@@ -303,6 +303,8 @@ export default function Game() {
                     player: message.player || message.player_id || "Jogador",
                     text: message.message || message.content || "",
                     dead: message.dead || false,
+                    aiSource: message.ai_source,
+                    aiModel: message.ai_model,
                     time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
                 }]);
                 break;
@@ -1109,6 +1111,11 @@ export default function Game() {
                                             <span className="text-xs text-mediumGray font-roboto">{msg.time}</span>
                                         </div>
                                         <p className={`text-sm font-roboto ${msg.dead ? 'text-gray-400' : 'text-offWhite'}`}>{msg.text}</p>
+                                        {msg.aiSource && (
+                                            <p className="text-[10px] text-lightGray/40 font-roboto mt-2">
+                                                IA: {msg.aiSource}{msg.aiModel ? ` · ${msg.aiModel}` : ""}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                             </div>

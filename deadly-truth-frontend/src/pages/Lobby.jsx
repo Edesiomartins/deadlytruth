@@ -281,20 +281,10 @@ export default function Lobby() {
 
     setPlayers([...players, newBot]);
     
-    // Adiciona mensagem do bot no chat quando ele é adicionado
-    const botGreetings = [
-      "Entrei na sala. Vamos resolver esse mistério!",
-      "Estou pronto para investigar.",
-      "Vamos descobrir a verdade.",
-      "Interessante... vamos ver o que aconteceu.",
-      "Estou aqui para ajudar na investigação."
-    ];
-    const randomGreeting = botGreetings[Math.floor(Math.random() * botGreetings.length)];
-    
     setMessages(prev => [...prev, {
       id: prev.length + 1,
-      user: randomName,
-      text: randomGreeting,
+      user: "Sistema",
+      text: `${randomName} entrou na sala.`,
       time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
     }]);
   };
@@ -304,19 +294,14 @@ export default function Lobby() {
       name => !players.some(p => p.name === name)
     );
     
-    const botsNeeded = Math.min(10 - players.length, availableBots.length);
+    const minimumNeeded = Math.max(0, 3 - players.length);
+    const botsNeeded = Math.min(minimumNeeded, 10 - players.length, availableBots.length);
     const newBots = [];
-    const botGreetings = [
-      "Entrei na sala. Vamos resolver esse mistério!",
-      "Estou pronto para investigar.",
-      "Vamos descobrir a verdade.",
-      "Interessante... vamos ver o que aconteceu.",
-      "Estou aqui para ajudar na investigação.",
-      "Vamos começar a investigação.",
-      "Pronto para o desafio.",
-      "Vamos desvendar esse caso."
-    ];
     const newMessages = [];
+
+    if (botsNeeded <= 0) {
+      return;
+    }
 
     for (let i = 0; i < botsNeeded; i++) {
       const randomName = availableBots[i];
@@ -332,12 +317,10 @@ export default function Lobby() {
         is_bot: true
       });
       
-      // Adiciona mensagem de cada bot no chat
-      const randomGreeting = botGreetings[Math.floor(Math.random() * botGreetings.length)];
       newMessages.push({
         id: messages.length + i + 1,
-        user: randomName,
-        text: randomGreeting,
+        user: "Sistema",
+        text: `${randomName} entrou na sala.`,
         time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
       });
     }
@@ -476,7 +459,7 @@ export default function Lobby() {
                   </button>
                   <button 
                     onClick={fillWithBots}
-                    disabled={players.length >= 10}
+                    disabled={players.length >= 3 || players.length >= 10}
                     className="flex-1 px-4 py-2 bg-darkGray/60 hover:bg-darkGray/80 border border-accentRed/30 hover:border-accentRed/50 text-accentRed text-sm font-medium tracking-wide rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed font-roboto"
                   >
                     🤖 Completar com Bots

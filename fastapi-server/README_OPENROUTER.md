@@ -1,131 +1,35 @@
-# 🌐 Configuração do OpenRouter AI
+# OpenRouter no Deadly Truth
 
-## O que é OpenRouter?
+O backend usa OpenRouter como motor principal das falas dos bots, com um único modelo principal e um único fallback externo.
 
-O **OpenRouter** é uma plataforma que oferece acesso a **múltiplos modelos de IA** através de uma única API, incluindo:
-- Meta Llama 3.3 70B
-- GPT-4, GPT-3.5
-- Claude (Anthropic)
-- Gemini (Google)
-- E muitos outros!
-
-## Como configurar?
-
-### 1. Adicione as variáveis no `.env`:
+## Variáveis
 
 ```bash
-# Escolha qual provedor usar: "groq", "deepseek" ou "openrouter"
-AI_PROVIDER=openrouter
-
-# Chave da API OpenRouter (https://openrouter.ai/)
-OPENROUTER_API_KEY=sk-or-v1-sua_chave_aqui
-
-# Modelo a ser usado (opcional, padrão: meta-llama/llama-3.3-70b-instruct)
-OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
+OPENROUTER_API_KEY=sua_chave_aqui
+OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+OPENROUTER_SITE_URL=http://localhost:5173
+OPENROUTER_APP_NAME=Deadly Truth
+OPENROUTER_PRIMARY_MODEL=qwen/qwen3-next-80b-a3b-instruct:free
+OPENROUTER_FALLBACK_MODEL=z-ai/glm-4.5-air:free
+AI_TIMEOUT_SECONDS=10
 ```
 
-### 2. Obtenha sua chave do OpenRouter:
+## Ordem de tentativa
 
-1. Acesse: https://openrouter.ai/
-2. Crie uma conta ou faça login
-3. Vá em **Keys** (no menu lateral)
-4. Clique em **Create Key**
-5. Copie sua chave (começa com `sk-or-v1-`)
+1. `qwen/qwen3-next-80b-a3b-instruct:free`
+2. `z-ai/glm-4.5-air:free`
+3. fallback local variado do jogo
 
-### 3. Escolha um modelo:
+Os bots não chamam IA ao entrar no lobby. A IA só é chamada quando o bot precisa falar, defender, votar ou responder interrogatório.
 
-Você pode usar qualquer modelo disponível no OpenRouter. Alguns recomendados:
+## Logs
 
-**Para qualidade máxima:**
-- `meta-llama/llama-3.3-70b-instruct` (padrão)
-- `anthropic/claude-3.5-sonnet`
-- `openai/gpt-4-turbo`
+Procure por:
 
-**Para velocidade:**
-- `meta-llama/llama-3.1-8b-instruct`
-- `google/gemini-pro-1.5`
-
-**Para economia:**
-- `meta-llama/llama-3.1-8b-instruct`
-- `mistralai/mistral-7b-instruct`
-
-Veja todos os modelos disponíveis em: https://openrouter.ai/models
-
-### 4. Configure no Railway:
-
-1. Vá no serviço do backend → **Variables**
-2. Adicione:
-   - `AI_PROVIDER` = `openrouter`
-   - `OPENROUTER_API_KEY` = sua chave (começa com `sk-or-v1-`)
-   - `OPENROUTER_MODEL` = modelo desejado (opcional)
-3. Salve e aguarde redeploy automático
-
-## Comparação de Provedores
-
-| Provedor | Modelos | Velocidade | Qualidade | Preço |
-|----------|---------|------------|-----------|-------|
-| **Groq** | Llama 3.3 70B | ⚡⚡⚡ Muito rápido | 🧠🧠🧠 Bom | 💰 Grátis (limite) |
-| **DeepSeek** | DeepSeek-V3 | ⚡⚡ Rápido | 🧠🧠🧠🧠 Excelente | 💰 Muito barato |
-| **OpenRouter** | 100+ modelos | ⚡⚡⚡ Variável | 🧠🧠🧠🧠🧠 Máxima | 💰 Variável |
-
-### Vantagens do OpenRouter:
-
-✅ **Acesso a múltiplos modelos** - Escolha o melhor para cada tarefa  
-✅ **Flexibilidade** - Mude de modelo sem mudar código  
-✅ **Modelos premium** - GPT-4, Claude, Gemini  
-✅ **Preços competitivos** - Compare preços entre modelos  
-✅ **Fallback automático** - Se um modelo falhar, tenta outro  
-
-## Como funciona?
-
-O código detecta automaticamente qual provedor usar baseado na variável `AI_PROVIDER`:
-
-```python
-# Se AI_PROVIDER=openrouter
-generate_case()  # Usa OpenRouter com modelo configurado
-ai_generate()    # Usa OpenRouter
-
-# Se AI_PROVIDER=groq (ou não definido)
-generate_case()  # Usa Groq
-ai_generate()    # Usa Groq (padrão)
+```text
+[OPENROUTER] Tentando modelo principal
+[OPENROUTER] Sucesso com modelo principal
+[OPENROUTER] Falha no modelo principal, tentando fallback
+[OPENROUTER] Sucesso com fallback
+[BOT_REPLY] bot=Shadow_Hunter source=openrouter
 ```
-
-## Exemplos de Modelos OpenRouter
-
-### Para casos de jogo (recomendado):
-```bash
-OPENROUTER_MODEL=meta-llama/llama-3.3-70b-instruct
-```
-
-### Para máxima qualidade:
-```bash
-OPENROUTER_MODEL=anthropic/claude-3.5-sonnet
-```
-
-### Para velocidade:
-```bash
-OPENROUTER_MODEL=meta-llama/llama-3.1-8b-instruct
-```
-
-### Para economia:
-```bash
-OPENROUTER_MODEL=mistralai/mistral-7b-instruct
-```
-
-## Migração
-
-Todas as funções existentes (`generate_case()`, `ai_generate()`) agora suportam OpenRouter automaticamente. Basta configurar as variáveis de ambiente!
-
-## Troubleshooting
-
-**Erro: "OPENROUTER_API_KEY não encontrada"**
-- Verifique se a variável está configurada no `.env` ou Railway
-- Certifique-se de que o nome está correto: `OPENROUTER_API_KEY`
-
-**Erro: "Model not found"**
-- Verifique se o modelo existe em https://openrouter.ai/models
-- Use o nome exato do modelo (ex: `meta-llama/llama-3.3-70b-instruct`)
-
-**Erro: "Insufficient credits"**
-- Adicione créditos na sua conta OpenRouter
-- Verifique os limites de uso em https://openrouter.ai/activity
