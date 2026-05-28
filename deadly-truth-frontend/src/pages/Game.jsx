@@ -944,6 +944,8 @@ export default function Game() {
                         })()}
                     </div>
                 </div>
+            )}
+
             {/* ✅ MODAL DE VOTAÇÃO EM ANDAMENTO */}
             {votingActive && (
                 <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center">
