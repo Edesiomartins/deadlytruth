@@ -8,7 +8,6 @@ import time
 from pathlib import Path
 from datetime import datetime
 import httpx  # pyright: ignore[reportMissingImports]
-from groq import Groq  # pyright: ignore[reportMissingImports]
 from openai import OpenAI  # pyright: ignore[reportMissingImports]
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request, Response, status  # pyright: ignore[reportMissingImports]
 from fastapi.responses import JSONResponse  # pyright: ignore[reportMissingImports]
@@ -83,30 +82,26 @@ from bot_memory import (
 
 # Rate limiting
 from rate_limiter import check_rate_limit, clear_room_limits
-from openrouter_client import call_openrouter
+from openrouter_client import (
+    OPENROUTER_DEFAULT_FALLBACK_MODEL,
+    OPENROUTER_DEFAULT_PRIMARY_MODEL,
+    call_openrouter,
+)
 
 # Turn lock security
 _turn_locks: dict[str, dict] = {}  # {room_id: {"player_id": "...", "locked_at": float, "action_taken": bool}}
 
-# 👇 CLIENTE GROQ CONFIGURADO COM SUA CHAVE
-# Inicializa o cliente Groq apenas se a chave estiver disponível
-_groq_case_client = None
+def is_openrouter_configured() -> bool:
+    return bool(os.getenv("OPENROUTER_API_KEY"))
 
-def get_groq_case_client():
-    """Obtém ou cria o cliente Groq para geração de casos"""
-    global _groq_case_client
-    if _groq_case_client is None:
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY não encontrada no ambiente")
-        _groq_case_client = Groq(api_key=api_key)
-    return _groq_case_client
+
+def get_active_ai_provider() -> str:
+    return "openrouter"
 
 async def generate_case(prompt_template: str = None):
     """
-    Gera um caso de assassinato usando IA via provedor configurado (Groq, DeepSeek ou OpenRouter).
+    Gera um caso de assassinato usando OpenRouter.
     Usa os prompts SYSTEM_GAME_MASTER e CREATE_CASE_TEMPLATE.
-    O provedor é escolhido via variável de ambiente AI_PROVIDER.
     """
     try:
         # Logging detalhado
@@ -115,67 +110,18 @@ async def generate_case(prompt_template: str = None):
         # Usa o prompt fornecido ou o template padrão
         user_prompt = prompt_template or CREATE_CASE_TEMPLATE
         
-        # Determina qual provedor usar
-        provider = os.getenv("AI_PROVIDER", "groq").lower()
-        
-        if provider == "openrouter":
-            logger.info(f"🔄 Gerando caso com OpenRouter...")
-            result = await call_openrouter(
-                [
-                    {"role": "system", "content": SYSTEM_GAME_MASTER},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.8,
-                max_tokens=2000,
-                timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")),
-            )
-            if not result:
-                return generate_fallback_case()
-        elif provider == "deepseek":
-            # Usa DeepSeek
-            api_key = os.getenv("DEEPSEEK_API_KEY", "")
-            if not api_key:
-                raise ValueError("DEEPSEEK_API_KEY não encontrada no ambiente")
-            logger.info(f"🔄 Gerando caso com DeepSeek...")
-            
-            client = get_deepseek_client()
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.chat.completions.create,
-                    model="deepseek-chat",
-                    messages=[
-                        {"role": "system", "content": SYSTEM_GAME_MASTER},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.8,
-                    max_tokens=2000
-                ),
-                timeout=30.0
-            )
-        else:
-            # Usa Groq (padrão)
-            api_key = os.getenv("GROQ_API_KEY", "")
-            if not api_key:
-                raise ValueError("GROQ_API_KEY não encontrada no ambiente")
-            logger.info(f"🔄 Gerando caso com Groq (modelo: llama-3.3-70b-versatile)...")
-            
-            client = get_groq_case_client()
-            response = await asyncio.wait_for(
-                asyncio.to_thread(
-                    client.chat.completions.create,
-                    model="llama-3.3-70b-versatile",
-                    messages=[
-                        {"role": "system", "content": SYSTEM_GAME_MASTER},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    temperature=0.8,
-                    max_tokens=2000
-                ),
-                timeout=15.0
-            )
-        
-        if provider != "openrouter":
-            result = response.choices[0].message.content
+        logger.info(f"🔄 Gerando caso com OpenRouter...")
+        result = await call_openrouter(
+            [
+                {"role": "system", "content": SYSTEM_GAME_MASTER},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.8,
+            max_tokens=2000,
+            timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")),
+        )
+        if not result:
+            return generate_fallback_case()
         logger.info(f"✅ Caso gerado com sucesso: {len(result)} chars")
         
         # ✅ Limpa JSON se necessário (remove markdown backticks)
@@ -185,7 +131,7 @@ async def generate_case(prompt_template: str = None):
         return result_clean
         
     except asyncio.TimeoutError:
-        logger.error(f"⏱️ Timeout na API {provider.upper()}")
+        logger.error(f"⏱️ Timeout na API OpenRouter")
         return generate_fallback_case()
     except Exception as e:
         logger.error(f"❌ Erro ao gerar caso: {str(e)}", exc_info=True)
@@ -193,23 +139,16 @@ async def generate_case(prompt_template: str = None):
 
 
 def generate_fallback_case():
-    """Gera um caso básico de fallback"""
-    try:
-        fallback_result = ai_generate(CREATE_CASE_TEMPLATE, system=SYSTEM_GAME_MASTER)
-        logger.info(f"✅ Usando fallback, resultado gerado (tamanho: {len(fallback_result)} caracteres)")
-        return fallback_result
-    except Exception as e2:
-        logger.error(f"❌ Erro no fallback também: {e2}")
-        # Retorna um caso básico de emergência
-        return json.dumps({
-            "case_id": "FALLBACK",
-                "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
-                "historia": "A investigação está em andamento. Reúna pistas e descubra a verdade.",
-                "local_corpo": "Local desconhecido",
-                "arma_crime": "Desconhecida",
-                "suspeitos": [],
-                "evidencias": []
-            })
+    """Gera um caso básico local quando a IA não responde."""
+    return json.dumps({
+        "case_id": "FALLBACK",
+        "descricao": "Um mistério foi revelado... Um assassinato ocorreu e você precisa descobrir o culpado.",
+        "historia": "A investigação está em andamento. Reúna pistas e descubra a verdade.",
+        "local_corpo": "Local desconhecido",
+        "arma_crime": "Desconhecida",
+        "suspeitos": [],
+        "evidencias": []
+    })
 
 # Carrega variáveis de ambiente do arquivo .env
 # Usa o diretório do arquivo atual para encontrar .env
@@ -230,31 +169,13 @@ else:
 # (útil se houver um .env que não sobrescreve variáveis do sistema)
 load_dotenv(override=False)
 
-# Debug: mostra todas as variáveis de ambiente que começam com GROQ
-print("🔍 Variáveis de ambiente relacionadas a GROQ:")
-groq_vars_found = False
-for key, value in os.environ.items():
-    if 'GROQ' in key.upper():
-        print(f"   {key} = {'*' * min(len(value), 20)} (tamanho: {len(value)})")
-        groq_vars_found = True
-if not groq_vars_found:
-    print("   (nenhuma variável encontrada)")
-
-api_key = os.getenv("GROQ_API_KEY")
-if not api_key:
-    print("❌ ERRO: GROQ_API_KEY não encontrada!")
-    print("🔧 SOLUÇÃO:")
-    print("   - Se estiver no Railway:")
-    print("     1. Vá no serviço do backend → Variables")
-    print("     2. Adicione: GROQ_API_KEY (nome exato, maiúsculas)")
-    print("     3. Valor: sua chave API do Groq")
-    print("     4. Salve e aguarde redeploy automático")
-    print("   - Se estiver localmente: Crie/edite fastapi-server/.env com: GROQ_API_KEY=sua-chave")
-    print(f"   - Arquivo .env existe? {env_path.exists()}")
-    print("   - Variáveis do sistema disponíveis? Verifique acima")
-else:
-    print(f"✅ GROQ_API_KEY encontrada (tamanho: {len(api_key)} caracteres)")
-    print(f"   Primeiros caracteres: {api_key[:10]}...")
+openrouter_primary_model = os.getenv("OPENROUTER_PRIMARY_MODEL", OPENROUTER_DEFAULT_PRIMARY_MODEL)
+openrouter_fallback_model = os.getenv("OPENROUTER_FALLBACK_MODEL", OPENROUTER_DEFAULT_FALLBACK_MODEL)
+active_ai_provider = "OpenRouter" if get_active_ai_provider() == "openrouter" else get_active_ai_provider().title()
+logger.info(f"[AI_CONFIG] OpenRouter configurado: {'sim' if is_openrouter_configured() else 'não'}")
+logger.info(f"[AI_CONFIG] Modelo principal: {openrouter_primary_model}")
+logger.info(f"[AI_CONFIG] Modelo fallback: {openrouter_fallback_model}")
+logger.info(f"[AI_CONFIG] Provedor principal ativo: {active_ai_provider}")
 
 app = FastAPI()
 
@@ -444,8 +365,6 @@ async def general_exception_handler(request: Request, exc: Exception):
 app.include_router(auth_router)
 
 # Clientes AI (inicializados lazy)
-_groq_client = None
-_deepseek_client = None
 _openrouter_client = None
 
 # Armazenamento em memória (em produção, usar Redis ou DB)
@@ -469,30 +388,6 @@ VALID_PHASES = {
 
 # ======== Funções auxiliares ========
 
-def get_groq_client():
-    """Obtém ou cria o cliente Groq (lazy initialization)"""
-    global _groq_client
-    if _groq_client is None:
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY não encontrada no .env")
-        _groq_client = Groq(api_key=api_key)
-    return _groq_client
-
-
-def get_deepseek_client():
-    """Obtém ou cria o cliente DeepSeek (lazy initialization)"""
-    global _deepseek_client
-    if _deepseek_client is None:
-        api_key = os.getenv("DEEPSEEK_API_KEY")
-        if not api_key:
-            raise ValueError("DEEPSEEK_API_KEY não encontrada no .env")
-        _deepseek_client = OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com"
-        )
-    return _deepseek_client
-
 
 def get_openrouter_client():
     """Obtém ou cria o cliente OpenRouter (lazy initialization)"""
@@ -503,74 +398,37 @@ def get_openrouter_client():
             raise ValueError("OPENROUTER_API_KEY não encontrada no .env")
         _openrouter_client = OpenAI(
             api_key=api_key,
-            base_url="https://openrouter.ai/api/v1"
+            base_url=os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
         )
     return _openrouter_client
 
 
 def ai_generate(prompt: str, system: str = None) -> str:
     """
-    Gera resposta usando o provedor de IA configurado (Groq, DeepSeek ou OpenRouter)
-    Provedor é escolhido via variável de ambiente AI_PROVIDER (groq, deepseek ou openrouter)
-    Padrão: groq
-    
+    Gera resposta usando OpenRouter.
     Para OpenRouter, use OPENROUTER_PRIMARY_MODEL (padrão: qwen/qwen3-next-80b-a3b-instruct:free)
     """
-    provider = os.getenv("AI_PROVIDER", "groq").lower()
-    
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
     
     try:
-        if provider == "deepseek":
-            # Usa DeepSeek-V3 (mais recente e poderoso)
-            print(f"🤖 Usando DeepSeek-V3...")
-            client = get_deepseek_client()
-            completion = client.chat.completions.create(
-                model="deepseek-chat",  # Usa o modelo mais recente
-                messages=messages,
-                temperature=0.8,
-                max_tokens=2048
-            )
-            return completion.choices[0].message.content or ""
-        elif provider == "openrouter":
-            # Usa OpenRouter (acesso a múltiplos modelos)
-            model = os.getenv("OPENROUTER_PRIMARY_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free")
-            print(f"🤖 Usando OpenRouter (modelo: {model})...")
-            client = get_openrouter_client()
-            completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.8,
-                max_tokens=2000
-            )
-            return completion.choices[0].message.content or ""
-        else:
-            # Usa Groq (padrão)
-            print(f"🤖 Usando Groq (Llama 3.3 70B Versatile)...")
-            client = get_groq_client()
-            completion = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                temperature=1,
-                max_completion_tokens=1024,
-                top_p=1,
-                stream=False,
-                stop=None
-            )
-            return completion.choices[0].message.content or ""
+        model = os.getenv("OPENROUTER_PRIMARY_MODEL", OPENROUTER_DEFAULT_PRIMARY_MODEL)
+        print(f"🤖 Usando OpenRouter (modelo: {model})...")
+        client = get_openrouter_client()
+        completion = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.8,
+            max_tokens=2000
+        )
+        return completion.choices[0].message.content or ""
     except ValueError as e:
-        return f"Erro de configuração ({provider}): {str(e)}"
+        return f"Erro de configuração (openrouter): {str(e)}"
     except Exception as e:
-        print(f"❌ Erro ao chamar {provider.upper()} API: {e}")
-        return f"Erro ao gerar resposta com {provider}: {str(e)}"
-
-
-def groq_generate(prompt: str, system: str = None) -> str:
-    """DEPRECATED: Use ai_generate() - Mantido por compatibilidade"""
-    return ai_generate(prompt, system)
+        print(f"❌ Erro ao chamar OPENROUTER API: {e}")
+        return f"Erro ao gerar resposta com openrouter: {str(e)}"
 
 
 # ======== Sistema de Bots ========
@@ -952,7 +810,7 @@ async def process_bot_turn(room_id: str, current_turn: int, current_player: dict
         "suspects": case_data.get("suspeitos", [])
     }
     
-    # Gera resposta do bot usando DeepSeek (motor para interação de bots)
+    # Gera resposta do bot usando OpenRouter
     bot_response, ai_meta = await _generate_bot_text(current_player, room, context=context, purpose="reply")
     
     # Registra declaração do bot para consistência e evitar contradições
@@ -1209,14 +1067,16 @@ def health():
 def debug_env():
     """Endpoint de debug para verificar variáveis de ambiente"""
     env_path = Path(__file__).parent / ".env"
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY")
     
     return {
         "env_file_exists": env_path.exists(),
         "env_file_path": str(env_path),
-        "groq_api_key_set": bool(api_key),
-        "groq_api_key_preview": api_key[:10] + "..." if api_key else None,
-        "groq_api_key_length": len(api_key) if api_key else 0
+        "openrouter_api_key_set": bool(api_key),
+        "openrouter_api_key_preview": api_key[:10] + "..." if api_key else None,
+        "openrouter_api_key_length": len(api_key) if api_key else 0,
+        "openrouter_primary_model": os.getenv("OPENROUTER_PRIMARY_MODEL", OPENROUTER_DEFAULT_PRIMARY_MODEL),
+        "openrouter_fallback_model": os.getenv("OPENROUTER_FALLBACK_MODEL", OPENROUTER_DEFAULT_FALLBACK_MODEL),
     }
 
 
@@ -1348,21 +1208,16 @@ async def ask_interrogation(room_id: str, req: InterrogationRequest):
         nivel=room.get("nivel", "Iniciante")
     )
     
-    # Usa Groq para gerar resposta do interrogatório (mestre do jogo)
-    # Isso inclui pistas sugeridas que serão reveladas aos jogadores
-    try:
-        groq_client = get_groq_case_client()
-        response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",  # Modelo LLaMA 3.3 70B Versatile
-            messages=[
-                {"role": "system", "content": SYSTEM_GAME_MASTER},
-                {"role": "user", "content": prompt}
-            ]
-        )
-        answer = response.choices[0].message.content
-    except Exception as e:
-        print(f"❌ Erro ao gerar resposta do interrogatório com Groq: {e}")
-        # Fallback para método antigo
+    answer = await call_openrouter(
+        [
+            {"role": "system", "content": SYSTEM_GAME_MASTER},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.8,
+        max_tokens=500,
+        timeout=float(os.getenv("AI_TIMEOUT_SECONDS", "10")),
+    )
+    if not answer:
         answer = ai_generate(prompt, system=SYSTEM_GAME_MASTER)
     
     # Estrutura a resposta corretamente
@@ -1571,12 +1426,10 @@ async def send_private_message(room_id: str, player_id: str, message: dict):
 
 def generate_clue_from_murder(victim_name: str, victim_info: dict, case_context: dict) -> str:
     """
-    Gera uma pista após um assassinato usando o provedor configurado (Groq, DeepSeek ou OpenRouter).
+    Gera uma pista após um assassinato usando OpenRouter.
     Analisa a morte e gera uma pista contextual.
     """
     try:
-        provider = os.getenv("AI_PROVIDER", "groq").lower()
-        
         prompt = f"""Você é o Mestre do Jogo 'Deadly Truth'. Um assassinato acabou de ocorrer.
 
 VÍTIMA: {victim_name}
@@ -1594,39 +1447,17 @@ Exemplo: "Pista encontrada: Fragmentos de tecido vermelho foram encontrados pert
 
 Responda APENAS com a pista, sem explicações adicionais:"""
         
-        if provider == "openrouter":
-            client = get_openrouter_client()
-            model = os.getenv("OPENROUTER_PRIMARY_MODEL", "qwen/qwen3-next-80b-a3b-instruct:free")
-            response = client.chat.completions.create(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_GAME_MASTER},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=500
-            )
-        elif provider == "deepseek":
-            client = get_deepseek_client()
-            response = client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[
-                    {"role": "system", "content": SYSTEM_GAME_MASTER},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.8,
-                max_tokens=500
-            )
-        else:
-            # Groq (padrão)
-            client = get_groq_case_client()
-            response = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[
-                    {"role": "system", "content": SYSTEM_GAME_MASTER},
-                    {"role": "user", "content": prompt}
-                ]
-            )
+        client = get_openrouter_client()
+        model = os.getenv("OPENROUTER_PRIMARY_MODEL", OPENROUTER_DEFAULT_PRIMARY_MODEL)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": SYSTEM_GAME_MASTER},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.8,
+            max_tokens=500
+        )
         
         clue = response.choices[0].message.content.strip()
         # Limpa a resposta
@@ -2445,7 +2276,7 @@ async def start_game_safe(room_id: str):
 
 
 async def game_loop(room_id: str):
-    """Loop principal do jogo - Gera o caso pelo MOTOR MESTRE (Groq) e gerencia os turnos"""
+    """Loop principal do jogo - gera o caso pelo provedor de IA ativo e gerencia os turnos."""
     logger.info(f"\n{'='*60}")
     logger.info(f"🎮 game_loop INICIADO para sala {room_id}")
     logger.info(f"{'='*60}\n")
@@ -2527,8 +2358,9 @@ async def game_loop(room_id: str):
         num_jogadores=num_jogadores
     )
     
-    # Usa a nova função generate_case com o prompt dinâmico (MOTOR MESTRE - GROQ)
-    print(f"🔄 Iniciando geração de caso pelo MOTOR MESTRE (Groq)...")
+    active_provider = get_active_ai_provider()
+    # Usa o provedor principal ativo para gerar o caso
+    print(f"🔄 Iniciando geração de caso pelo MOTOR MESTRE ({active_provider})...")
     print(f"   Prompt: {prompt_dinamico[:200]}...")
     print(f"   Room ID: {room_id}")
     print(f"   Cenário: {cenario_escolhido}")
@@ -2536,15 +2368,7 @@ async def game_loop(room_id: str):
     print(f"   Número de jogadores: {num_jogadores}")
     
     try:
-        # Verifica API key antes de chamar
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            raise ValueError("GROQ_API_KEY não encontrada no ambiente")
-        
-        print(f"✅ GROQ_API_KEY encontrada (tamanho: {len(api_key)} caracteres)")
-        print(f"   Primeiros 10 chars: {api_key[:10]}...")
-        
-        # Chama o motor mestre (Groq) para gerar o caso
+        # Chama o motor mestre para gerar o caso
         logger.info(f"🔄 Chamando generate_case() para sala {room_id}...")
         case_json = await generate_case(prompt_dinamico)
         
@@ -2590,15 +2414,10 @@ async def game_loop(room_id: str):
         import traceback
         traceback.print_exc()
         
-        # Verifica se é problema de API key
-        api_key = os.getenv("GROQ_API_KEY")
-        if not api_key:
-            print(f"❌ GROQ_API_KEY não encontrada no ambiente!")
-            print(f"   Verifique se a variável está configurada no Railway/local")
-            print(f"   Variáveis de ambiente disponíveis: {[k for k in os.environ.keys() if 'GROQ' in k.upper()]}")
-        else:
-            print(f"✅ GROQ_API_KEY encontrada (tamanho: {len(api_key)} caracteres)")
-            print(f"   Pode ser problema de conexão ou formato da resposta")
+        logger.warning(
+            f"⚠️ Falha ao gerar caso com provedor ativo={active_provider}. "
+            f"OpenRouter configurado={'sim' if is_openrouter_configured() else 'não'}"
+        )
         
         # Usa um caso de fallback
         case_json = json.dumps({
@@ -3516,7 +3335,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
                                 # Aguarda um tempo aleatório antes de responder (1-3 segundos)
                                 await asyncio.sleep(random.uniform(1, 3))
                                 
-                                # Gera resposta do bot usando DeepSeek
+                                # Gera resposta do bot usando OpenRouter
                                 try:
                                     room["room_id"] = room_id
                                     bot_reply, ai_meta = await _generate_bot_text(

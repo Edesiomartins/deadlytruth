@@ -8,7 +8,7 @@ Agora o jogo suporta **bots controlados por IA** que podem jogar sozinhos ou com
 
 1. **10 Bots com Personalidades Únicas**
    - Cada bot tem personalidade, estilo de fala e características próprias
-   - Respostas geradas por IA (Groq ou DeepSeek)
+   - Respostas geradas por IA via OpenRouter
    - Comportamento natural e imersivo
 
 2. **Sistema de Turnos Automático**
@@ -135,7 +135,7 @@ Quando é a vez de um bot, o sistema:
    Faça uma observação relevante (2-3 frases):
    ```
 
-3. **IA gera resposta** (Groq ou DeepSeek)
+3. **IA gera resposta** (OpenRouter)
 
 4. **Bot "fala"** no chat
 
