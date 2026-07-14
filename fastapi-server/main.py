@@ -214,152 +214,36 @@ app.add_middleware(
     allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*", "Authorization", "Content-Type"],  # ✅ Inclui Authorization explicitamente
-    expose_headers=["*"],
+    allow_headers=["Authorization", "Content-Type"],
     max_age=3600,  # Cache preflight por 1 hora
 )
 
-# Middleware adicional para garantir headers CORS em todas as respostas
-@app.middleware("http")
-async def add_cors_headers(request: Request, call_next):
-    """Garante que headers CORS sejam sempre enviados"""
-    origin = request.headers.get("origin")
-    
-    # Se for uma requisição OPTIONS (preflight), responde diretamente
-    if request.method == "OPTIONS":
-        response = Response()
-        # Sempre adiciona headers CORS para requisições OPTIONS
-        if origin:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-        else:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
-        response.headers["Access-Control-Max-Age"] = "3600"
-        return response
-    
-    # Para outras requisições, processa normalmente e adiciona headers
-    try:
-        response = await call_next(request)
-    except (FastAPIHTTPException, StarletteHTTPException) as e:
-        # Re-raise HTTPExceptions para que sejam tratadas pelos exception handlers
-        raise
-    except Exception as e:
-        # Se houver outra exceção, cria uma resposta de erro com CORS
-        response = JSONResponse(
-            status_code=500,
-            content={"detail": str(e)}
-        )
-    
-    # Adiciona headers CORS em todas as respostas (incluindo erros)
-    # Sempre adiciona headers se houver origin, mesmo que não esteja na lista (para debug)
-    if origin:
-        if origin in allowed_origins:
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-        else:
-            # Permite mesmo se não estiver na lista (para debug - remover em produção se necessário)
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    else:
-        # Se não houver origin, permite todas (útil para desenvolvimento)
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    
-    return response
-
-# Exception handlers globais para garantir CORS mesmo em erros
-@app.exception_handler(FastAPIHTTPException)
-async def fastapi_http_exception_handler(request: Request, exc: FastAPIHTTPException):
-    """Handler para exceções HTTP do FastAPI que garante CORS"""
-    origin = request.headers.get("origin")
-    
-    # Cria resposta JSON com o erro
-    response = JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
-    
-    # Adiciona headers CORS mesmo em erros
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
-    else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    
-    return response
-
-@app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException):
-    """Handler para exceções HTTP do Starlette que garante CORS"""
-    origin = request.headers.get("origin")
-    
-    # Cria resposta JSON com o erro
-    response = JSONResponse(
-        status_code=exc.status_code,
-        content={"detail": exc.detail}
-    )
-    
-    # Adiciona headers CORS mesmo em erros
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    
-    return response
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    """Handler para erros de validação que garante CORS"""
-    origin = request.headers.get("origin")
-    response = JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors()}
-    )
-    # Sempre adiciona headers CORS se houver origin
-    if origin:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"  # ✅ Inclui Authorization explicitamente
-    else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    return response
+# NOTA DE SEGURANÇA: o middleware CORS manual e os exception handlers que
+# refletiam QUALQUER origem (Access-Control-Allow-Origin: <origin> com
+# credentials=true) foram removidos. Isso anulava a proteção CORS por completo.
+# O CORSMiddleware acima já adiciona os headers corretos em TODAS as respostas,
+# incluindo erros (4xx/5xx) e respostas dos exception handlers.
 
 
 @app.exception_handler(Exception)
 async def general_exception_handler(request: Request, exc: Exception):
-    """Handler para erros gerais (500) que garante CORS"""
+    """Handler para erros gerais (500).
+
+    NOTA: este handler roda FORA do CORSMiddleware (ServerErrorMiddleware é o
+    mais externo), então adicionamos headers CORS manualmente — mas APENAS
+    para origens da whitelist, nunca refletindo origem arbitrária.
+    """
     import traceback
-    print(f"❌ Erro não tratado: {exc}")
-    print(traceback.format_exc())
-    
-    origin = request.headers.get("origin")
+    logger.error(f"❌ Erro não tratado: {exc}")
+    logger.error(traceback.format_exc())
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": f"Erro interno do servidor: {str(exc)}"}
+        content={"detail": "Erro interno do servidor"},
     )
-    # Sempre adiciona headers CORS se houver origin
-    if origin:
+    origin = request.headers.get("origin")
+    if origin and origin in allowed_origins:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
-    else:
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "*, Authorization, Content-Type"
     return response
 
 app.include_router(auth_router)
@@ -1063,9 +947,18 @@ def health():
     return {"status": "ok", "message": "Servidor rodando"}
 
 
+def _debug_endpoints_enabled() -> bool:
+    """Endpoints de debug só ficam disponíveis fora de produção (ou com DEBUG_ENDPOINTS=true)."""
+    if os.getenv("DEBUG_ENDPOINTS", "").lower() == "true":
+        return True
+    return os.getenv("ENVIRONMENT", "development").lower() != "production"
+
+
 @app.get("/debug/env")
 def debug_env():
-    """Endpoint de debug para verificar variáveis de ambiente"""
+    """Endpoint de debug para verificar variáveis de ambiente (desabilitado em produção)"""
+    if not _debug_endpoints_enabled():
+        raise FastAPIHTTPException(status_code=404, detail="Not Found")
     env_path = Path(__file__).parent / ".env"
     api_key = os.getenv("OPENROUTER_API_KEY")
     
@@ -1073,8 +966,6 @@ def debug_env():
         "env_file_exists": env_path.exists(),
         "env_file_path": str(env_path),
         "openrouter_api_key_set": bool(api_key),
-        "openrouter_api_key_preview": api_key[:10] + "..." if api_key else None,
-        "openrouter_api_key_length": len(api_key) if api_key else 0,
         "openrouter_primary_model": os.getenv("OPENROUTER_PRIMARY_MODEL", OPENROUTER_DEFAULT_PRIMARY_MODEL),
         "openrouter_fallback_model": os.getenv("OPENROUTER_FALLBACK_MODEL", OPENROUTER_DEFAULT_FALLBACK_MODEL),
     }
@@ -1082,7 +973,9 @@ def debug_env():
 
 @app.get("/debug/cors")
 def debug_cors(request: Request):
-    """Endpoint de debug para verificar configuração CORS"""
+    """Endpoint de debug para verificar configuração CORS (desabilitado em produção)"""
+    if not _debug_endpoints_enabled():
+        raise FastAPIHTTPException(status_code=404, detail="Not Found")
     origin = request.headers.get("origin", "Nenhuma origem enviada")
     return {
         "allowed_origins": allowed_origins,
@@ -1114,10 +1007,16 @@ async def get_room_state(room_id: str):
                 "game_active": room.get("game_active", False),
                 "current_turn_player_id": room.get("current_turn"),
                 "case": room.get("case", {}),
-                "players": room.get("players", []),
+                "players": to_public_players(room.get("players", [])),
                 "clues": get_all_clues_list(room_id),
                 "recent_chat": room.get("chat", [])[-30:],
             }
+        else:
+            # Snapshot do banco também precisa ser sanitizado (contém is_killer)
+            if isinstance(snapshot, dict) and "players" in snapshot:
+                snapshot["players"] = to_public_players(snapshot.get("players", []))
+            if isinstance(snapshot, dict):
+                snapshot.pop("killer_id", None)
         return JSONResponse(content={"success": True, "state": snapshot})
     except Exception as e:
         return JSONResponse(
@@ -1264,6 +1163,24 @@ async def broadcast(room_id: str, message: dict):
             print(f"Failed to send to WebSocket: {e}")
 
 
+# ======== Sanitização de dados (anticheat) ========
+# Campos que NUNCA podem ser enviados em broadcast: revelam o assassino
+# ou expõem dados pessoais (email) de outros jogadores.
+_PRIVATE_PLAYER_FIELDS = {"is_killer", "email"}
+
+
+def to_public_player(player) -> dict:
+    """Retorna versão pública de um jogador, sem campos sensíveis (is_killer, email)."""
+    if not isinstance(player, dict):
+        return {"id": str(player), "name": str(player)}
+    return {k: v for k, v in player.items() if k not in _PRIVATE_PLAYER_FIELDS}
+
+
+def to_public_players(players) -> list:
+    """Sanitiza uma lista de jogadores para broadcast."""
+    return [to_public_player(p) for p in (players or [])]
+
+
 async def broadcast_players(room_id: str):
     """Envia lista atualizada de jogadores para todos os conectados na sala"""
     room = ROOMS.get(room_id)
@@ -1382,7 +1299,7 @@ async def broadcast_game_state(room_id):
         "type": "game_state",
         "phase": room.get("phase", "lobby"),
         "current_turn_player_id": str(room.get("current_turn_player_id") or ""),
-        "players": room.get("players", []),
+        "players": to_public_players(room.get("players", [])),
         "active_accusation": room.get("active_accusation"),
         "active_interrogation": room.get("active_interrogation"),
     })
@@ -2928,7 +2845,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
     # Notifica todos os jogadores sobre a atualização da lista
     await broadcast(room_id, {
         "type": "players_update",
-        "players": room.get("players", []),
+        "players": to_public_players(room.get("players", [])),
         "new_player": player_identifier
     })
     
@@ -2989,7 +2906,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
             "current_turn": room.get("current_turn", 0),
             "game_active": room.get("game_active", False)
         },
-        "players_list": room.get("players", [])  # Envia lista completa de jogadores
+        "players_list": to_public_players(room.get("players", []))  # Envia lista completa de jogadores (sanitizada)
     }))
     
     logger.info(f"✅ Hello enviado com player_id numérico: {player_numeric_id} para {player_identifier}")
@@ -3007,7 +2924,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
     # Envia atualização de jogadores para sincronizar
     await broadcast(room_id, {
         "type": "players_update",
-        "players": room.get("players", []),
+        "players": to_public_players(room.get("players", [])),
         "new_player": player_identifier
     })
     
@@ -3428,7 +3345,7 @@ async def ws_room(websocket: WebSocket, room_id: str):
             # Notifica todos sobre a desconexão (mas não remove)
             await broadcast(room_id, {
                 "type": "players_update",
-                "players": room.get("players", []),
+                "players": to_public_players(room.get("players", [])),
                 "disconnected_player": player_identifier
             })
             
